@@ -103,7 +103,7 @@ test("the same fixture with no config file appends nothing and never throws", as
   assert.equal(outboxFiles(dataDir).length, 0);
 });
 
-test("PostToolUse strips tool_input/tool_output but keeps tool_name/tool_use_id", async () => {
+test("PostToolUse forwards only allowlisted metadata — no tool bodies under any name, no local paths", async () => {
   const dataDir = tmpDataDir();
   const cfg: DeviceConfig = { token: "tok", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev1" };
   saveConfig(dataDir, cfg);
@@ -116,17 +116,25 @@ test("PostToolUse strips tool_input/tool_output but keeps tool_name/tool_use_id"
   });
   const repo = initRepo("git@github.com:acme/widgets.git");
 
+  // The real captured PostToolUse shape (claude 2.1.241: tool_response, not
+  // tool_output) plus a field the vendor has never sent — the allowlist must
+  // drop what it has not heard of, not just what it can name.
   await runHook(
     "PostToolUse",
     {
       session_id: "s1",
       hook_event_name: "PostToolUse",
+      transcript_path: "/Users/dev/.claude/transcripts/s1.jsonl",
       cwd: repo,
       prompt_id: "p1",
+      permission_mode: "default",
       tool_name: "Bash",
       tool_use_id: "tu1",
+      duration_ms: 2,
       tool_input: { command: "cat ~/.ssh/id_rsa" },
-      tool_output: "-----BEGIN OPENSSH PRIVATE KEY-----",
+      tool_response: { stdout: "-----BEGIN OPENSSH PRIVATE KEY-----" },
+      tool_output: "LEGACY_BODY_FIELD_MUST_NOT_FORWARD",
+      some_future_vendor_field: "FUTURE_BODY_MUST_NOT_FORWARD",
     },
     dataDir,
   );
@@ -136,11 +144,59 @@ test("PostToolUse strips tool_input/tool_output but keeps tool_name/tool_use_id"
   const raw = readFileSync(join(dataDir, "outbox", files[0]), "utf8");
   assert.doesNotMatch(raw, /BEGIN OPENSSH PRIVATE KEY/);
   assert.doesNotMatch(raw, /id_rsa/);
+  assert.doesNotMatch(raw, /LEGACY_BODY_FIELD_MUST_NOT_FORWARD/);
+  assert.doesNotMatch(raw, /FUTURE_BODY_MUST_NOT_FORWARD/);
+  assert.doesNotMatch(raw, /transcripts/);
   assert.match(raw, /"tool_name":"Bash"/);
   assert.match(raw, /"tool_use_id":"tu1"/);
 
-  const parsed = JSON.parse(raw) as { repoCwd: string };
+  const parsed = JSON.parse(raw) as { repoCwd: string; payload: Record<string, unknown> };
   assert.equal(parsed.repoCwd, ".", "cwd at the repo root should be reported as '.', not an absolute or ../-laden path");
+  assert.ok(!("cwd" in parsed.payload), "the absolute cwd must never ride the payload");
+  assert.ok(!("tool_input" in parsed.payload) && !("tool_response" in parsed.payload));
+});
+
+test("UserPromptSubmit mints a turnKey the following events carry until the next prompt", async () => {
+  const dataDir = tmpDataDir();
+  const cfg: DeviceConfig = { token: "tok", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev1" };
+  saveConfig(dataDir, cfg);
+  savePolicy(dataDir, {
+    etag: "e1",
+    fetchedAt: Date.now(),
+    ttlSeconds: 900,
+    captureLevel: "metadata",
+    workspaces: [{ canonicalRepo: "github.com/acme/widgets", aliases: [], route: "project:p1" }],
+  });
+  const repo = initRepo("git@github.com:acme/widgets.git");
+
+  interface OutboxEvent {
+    kind: string;
+    turnKey?: string;
+    payload: { prompt?: string };
+  }
+  const readEvents = (): OutboxEvent[] =>
+    outboxFiles(dataDir).map((f) => JSON.parse(readFileSync(join(dataDir, "outbox", f), "utf8")) as OutboxEvent);
+
+  await runHook("SessionStart", { ...sessionStartInput, cwd: repo }, dataDir);
+  await runHook("UserPromptSubmit", { session_id: "s1", hook_event_name: "UserPromptSubmit", cwd: repo, prompt: "one" }, dataDir);
+  await runHook("PostToolUse", { session_id: "s1", hook_event_name: "PostToolUse", cwd: repo, tool_name: "Read", tool_use_id: "tu1" }, dataDir);
+  await runHook("Stop", { session_id: "s1", hook_event_name: "Stop", cwd: repo, last_assistant_message: "done" }, dataDir);
+  await runHook("UserPromptSubmit", { session_id: "s1", hook_event_name: "UserPromptSubmit", cwd: repo, prompt: "two" }, dataDir);
+  await runHook("SessionEnd", { session_id: "s1", hook_event_name: "SessionEnd", cwd: repo, reason: "other" }, dataDir);
+
+  const events = readEvents();
+  const byKind = (kind: string) => events.filter((e) => e.kind === kind);
+
+  for (const e of [...byKind("SessionStart"), ...byKind("workspace.observed")]) {
+    assert.equal(e.turnKey, undefined, `${e.kind} must carry no turnKey`);
+  }
+  const prompt1 = events.find((e) => e.kind === "UserPromptSubmit" && e.payload.prompt === "one");
+  const prompt2 = events.find((e) => e.kind === "UserPromptSubmit" && e.payload.prompt === "two");
+  assert.ok(prompt1?.turnKey && prompt2?.turnKey, "each prompt mints a turnKey");
+  assert.notEqual(prompt1.turnKey, prompt2.turnKey, "a new prompt replaces the key");
+  assert.equal(byKind("PostToolUse")[0].turnKey, prompt1.turnKey);
+  assert.equal(byKind("Stop")[0].turnKey, prompt1.turnKey);
+  assert.equal(byKind("SessionEnd")[0].turnKey, prompt2.turnKey, "SessionEnd still carries the latest prompt's key");
 });
 
 test("a stale policy is refreshed before the gate, and the refresh is what this invocation gates on", async () => {

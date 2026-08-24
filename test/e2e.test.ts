@@ -44,6 +44,7 @@ interface Fixture {
   repo: string;
   repoCwd: string;
   occurredAt: string;
+  turnKey?: string;
   payload: unknown;
 }
 
@@ -126,6 +127,6 @@ test("pairs a device, replays a session, and reads it back through the dashboard
     { encoding: "utf8" },
   );
   assert.doesNotMatch(toolCalls, /MARKER_TOOL_INPUT_BODY_MUST_NOT_PROJECT/);
-  assert.doesNotMatch(toolCalls, /MARKER_TOOL_OUTPUT_BODY_MUST_NOT_PROJECT/);
-  assert.match(toolCalls, /Edit/, "expected the PostToolUse call's tool name to still be present");
+  assert.doesNotMatch(toolCalls, /MARKER_TOOL_RESPONSE_BODY_MUST_NOT_PROJECT/);
+  assert.match(toolCalls, /Read/, "expected the PostToolUse call's tool name to still be present");
 });

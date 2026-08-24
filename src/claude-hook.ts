@@ -1,8 +1,9 @@
 // The single entry every Claude Code hook invokes, with the event name as
 // argv[2] and the hook JSON on stdin. Must never throw to the IDE: the CLI
 // bootstrap below always exits 0.
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { loadConfig, loadPolicy } from "./config.js";
 import { routeFor } from "./gate.js";
@@ -12,39 +13,72 @@ import { refreshPolicy } from "./send.js";
 
 interface HookInput {
   session_id?: string;
-  transcript_path?: string;
   cwd?: string;
-  hook_event_name?: string;
-  prompt_id?: string;
-  user_input?: unknown;
-  tool_name?: string;
-  tool_input?: unknown;
-  tool_output?: unknown;
-  tool_use_id?: string;
-  last_assistant_message?: unknown;
-  reason?: string;
   [key: string]: unknown;
 }
 
-// Fields that never leave the machine regardless of event: absolute local
-// paths (spec §4.2) and anything reasoning/thinking-named (spec §4.4).
-const ALWAYS_STRIP = new Set(["cwd", "transcript_path"]);
-const PER_EVENT_STRIP: Record<string, string[]> = {
-  PostToolUse: ["tool_input", "tool_output"],
+// What leaves the machine is an ALLOWLIST, never a strip list: the vendor
+// grows and renames payload fields without notice (tool_output became
+// tool_response), and a strip list forwards whatever it has not heard of.
+// Every key below was observed on a real captured hook stream (claude
+// 2.1.241). Beyond them nothing is forwarded — not tool bodies under any
+// name, not absolute local paths (cwd, transcript_path), not anything
+// reasoning/thinking-named.
+const ALLOW_EVERY_EVENT = ["hook_event_name", "session_id", "prompt_id", "permission_mode"] as const;
+const ALLOW_PER_EVENT: Record<string, readonly string[]> = {
+  SessionStart: ["source"],
+  // The prompt text and the assistant reply are the capture contract (spec
+  // §4.4): forwarded whole.
+  UserPromptSubmit: ["prompt"],
+  PostToolUse: ["tool_name", "tool_use_id", "duration_ms"],
+  Stop: ["stop_hook_active", "last_assistant_message"],
+  SessionEnd: ["reason"],
 };
 
-function isReasoningKey(key: string): boolean {
-  return /reasoning|thinking/i.test(key);
-}
-
 function filterPayload(eventName: string, raw: HookInput): Record<string, unknown> {
-  const strip = new Set([...ALWAYS_STRIP, ...(PER_EVENT_STRIP[eventName] ?? [])]);
   const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(raw)) {
-    if (strip.has(key) || isReasoningKey(key)) continue;
-    out[key] = value;
+  for (const key of [...ALLOW_EVERY_EVENT, ...(ALLOW_PER_EVENT[eventName] ?? [])]) {
+    if (key in raw) out[key] = raw[key];
   }
   return out;
+}
+
+// The turn key is plugin-minted, never the vendor's: a fresh uuid at every
+// UserPromptSubmit, persisted per (tool, external session) so each later
+// event of the session carries the same key until the next prompt replaces
+// it. The server treats it as an untrusted hint and falls back to
+// open-turn-by-ordinal when it is absent.
+function turnKeyFile(dataDir: string, tool: string, externalSessionId: string): string {
+  return join(dataDir, "turnkeys", `${tool}-${encodeURIComponent(externalSessionId)}`);
+}
+
+function resolveTurnKey(dataDir: string, eventName: string, externalSessionId: string): string | undefined {
+  if (externalSessionId === "" || eventName === "SessionStart") return undefined;
+  const file = turnKeyFile(dataDir, "claude_code", externalSessionId);
+  if (eventName === "UserPromptSubmit") {
+    const minted = randomUUID();
+    try {
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, minted);
+    } catch {
+      // this event still carries the key; later ones fall back server-side
+    }
+    return minted;
+  }
+  let key: string | undefined;
+  try {
+    key = readFileSync(file, "utf8").trim() || undefined;
+  } catch {
+    key = undefined; // no prompt observed yet (or state lost) — omit the hint
+  }
+  if (eventName === "SessionEnd") {
+    try {
+      unlinkSync(file);
+    } catch {
+      // best-effort cleanup; a leftover file is one stale key per session
+    }
+  }
+  return key;
 }
 
 export async function runHook(eventName: string, input: HookInput, dataDir: string): Promise<void> {
@@ -75,6 +109,7 @@ export async function runHook(eventName: string, input: HookInput, dataDir: stri
 
   const sessionId = input.session_id ?? "";
   const repoCwd = repoRelativeCwd(cwd);
+  const turnKey = resolveTurnKey(dataDir, eventName, sessionId);
 
   appendEvent(dataDir, {
     captureEventId: randomUUID(),
@@ -84,6 +119,7 @@ export async function runHook(eventName: string, input: HookInput, dataDir: stri
     repo: route.canonicalRepo,
     repoCwd,
     occurredAt: new Date().toISOString(),
+    ...(turnKey === undefined ? {} : { turnKey }),
     payload: filterPayload(eventName, input),
   });
 
