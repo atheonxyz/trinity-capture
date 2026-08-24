@@ -109,6 +109,6 @@ test("the connect command is manual-only and passes one pairing-code argument", 
   const command = readFileSync(join(process.cwd(), "claude-code", "commands", "trinity-connect.md"), "utf8");
   assert.match(command, /^argument-hint: \[pairing-code\]$/m);
   assert.match(command, /^disable-model-invocation: true$/m);
-  assert.match(command, /dist\/connect\.js" \$1/);
+  assert.match(command, /dist\/connect\.js" "\$1"/);
   assert.doesNotMatch(command, /\$ARGUMENTS/);
 });
