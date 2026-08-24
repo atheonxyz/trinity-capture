@@ -6,7 +6,9 @@ plugin per coding product. Claude Code ships in Phase 1; Codex and Cursor are de
 
 ## Setup (Claude Code)
 
-1. Install the `trinity-capture` plugin from the Claude Code marketplace.
+1. Install the `trinity-capture` plugin: `/plugin marketplace add <this repo>` (the
+   repo-root `.claude-plugin/marketplace.json` names the plugin), then
+   `/plugin install trinity-capture@trinity`.
 2. In any project, run `/trinity-connect <code>` with the pairing code shown on your
    Trinity dashboard's IDE integrations page (e.g. `/trinity-connect ABCD1234EFGH`).
    This exchanges the code for a device token and writes it to the plugin's own data

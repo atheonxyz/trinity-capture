@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { saveConfig, savePolicy } from "../src/config.js";
 
 // pnpm test always runs from capture/.
@@ -78,4 +78,29 @@ test("committed binary, authorized + allowlisted: appends the SessionStart pair"
     .map((f) => (JSON.parse(readFileSync(join(dataDir, "outbox", f), "utf8")) as { kind: string }).kind)
     .sort();
   assert.deepEqual(kinds, ["SessionStart", "workspace.observed"]);
+});
+
+test("the repo-root marketplace manifest names trinity-capture at the packaged plugin dir", () => {
+  // `/plugin marketplace add <repo>` reads .claude-plugin/marketplace.json at
+  // the REPO root; the plugin's own manifest alone is not installable.
+  const manifestPath = join(process.cwd(), "..", ".claude-plugin", "marketplace.json");
+  assert.ok(existsSync(manifestPath), `${manifestPath} is missing — the plugin is not installable without it`);
+
+  interface MarketplaceManifest {
+    name: string;
+    plugins: { name: string; source: string; version: string }[];
+  }
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as MarketplaceManifest;
+  const entry = manifest.plugins.find((p) => p.name === "trinity-capture");
+  assert.ok(entry, "marketplace.json lists no trinity-capture plugin");
+
+  const sourceDir = resolve(process.cwd(), "..", entry.source);
+  assert.equal(sourceDir, resolve(process.cwd(), "claude-code"), `entry source ${entry.source} does not resolve to capture/claude-code`);
+
+  // The entry must point at a real packaged plugin: its own manifest agrees
+  // on the name, and the committed hook binary sits beneath it.
+  const plugin = JSON.parse(readFileSync(join(sourceDir, ".claude-plugin", "plugin.json"), "utf8")) as { name: string; version: string };
+  assert.equal(plugin.name, entry.name);
+  assert.equal(plugin.version, entry.version, "marketplace entry and plugin.json disagree on the version");
+  assert.ok(existsSync(join(sourceDir, "dist", "claude-hook.js")), "the marketplace entry points at a dir without the committed build");
 });
