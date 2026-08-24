@@ -1,0 +1,131 @@
+# capture
+
+The client half of Trinity's IDE session ingestion: a shared TypeScript core plus one
+plugin per coding product. Claude Code ships in Phase 1; Codex and Cursor are designed
+(see the design doc) but not yet built.
+
+## Setup (Claude Code)
+
+1. Install the `trinity-capture` plugin from the Claude Code marketplace.
+2. In any project, run `/trinity-connect` and paste the pairing code shown on your
+   Trinity dashboard's IDE integrations page (or pass it directly:
+   `/trinity-connect ABCD1234EFGH`). This exchanges the code for a device token and
+   writes it to the plugin's own data directory — never into the repo, never into shell
+   history.
+3. That's it. The plugin captures sessions automatically for every repository one of
+   your projects has selected; everything else produces zero network traffic (see
+   **Fail-closed guarantees** below).
+
+`TRINITY_BASE_URL` overrides the dashboard origin `/trinity-connect` exchanges the
+pairing code against, for pointing a local build at a non-production backend.
+
+## Architecture
+
+```
+capture/
+├── src/
+│   ├── config.ts      DeviceConfig + Policy: load/save from CLAUDE_PLUGIN_DATA
+│   ├── gate.ts         routeFor(): the fail-closed allowlist check
+│   ├── outbox.ts        appendEvent()/drain(): local queue, batched send
+│   ├── send.ts          sendBatch()/refreshPolicy(): the wire calls
+│   ├── observe.ts       gitRemoteOf()/workspaceObserved(): local git metadata
+│   ├── claude-hook.ts    the plugin entry every Claude Code hook invokes
+│   └── connect.ts        the /trinity-connect command
+└── claude-code/
+    ├── .claude-plugin/plugin.json
+    ├── hooks/hooks.json     registers the five lifecycle hooks
+    └── commands/trinity-connect.md
+```
+
+Every hook invocation is a fresh, short-lived process — there is no daemon and nothing
+runs between hook events. `claude-hook.ts` reads the hook's stdin JSON, checks the gate,
+filters the payload to the capture level, appends it to the local outbox, and (except on
+`SessionEnd`, which stays append-only and synchronous to respect its tight timeout
+budget) drains the outbox to the backend. One synthesized event, `workspace.observed`,
+supplements the native ones at `SessionStart`: bounded, deterministic git metadata
+(branch, HEAD SHA, dirty flag, diffstat, changed files) that the server can never read
+directly.
+
+## Capture levels
+
+Phase 1 supports exactly one capture level, `metadata`, for every project:
+
+- Prompts (`user_input`) and assistant responses (`last_assistant_message`) are sent in
+  full — they're the session's substance.
+- Tool calls are sent as metadata only: `tool_name` and `tool_use_id`, never
+  `tool_input`/`tool_output`.
+- Any field whose name contains "reasoning" or "thinking" is never sent, regardless of
+  event or capture level.
+
+A `full-bodies` level (bounded, redacted tool call bodies, opt-in per project) is a
+designed extension, not implemented yet.
+
+## Fail-closed guarantees
+
+- **No config, no send.** A device that was never paired (`loadConfig` returns `null`)
+  makes zero network requests, for any hook, ever.
+- **No policy, no send.** A missing or expired (15-minute TTL) capture-policy document
+  fails every gate check closed — not just for a specific repo, for everything.
+- **Unmatched repo, no send.** A git remote that doesn't normalize to an allowlisted
+  `canonicalRepo` or one of its aliases produces zero network requests for that
+  workspace — not even identity. This is what makes a personal or unrelated repository
+  safe to open with the plugin installed.
+- **Absolute paths never leave the machine.** The raw hook payload's `cwd` and
+  `transcript_path` are always stripped before send; only the repo-relative cwd travels.
+- **The outbox survives failure.** Every event is written to disk before any network
+  I/O. A request-level failure (network error, 401/403/429/5xx) retains the entire
+  outbox for retry; only a definitive per-item outcome (`stored`, `duplicate`, or
+  `rejected_permanent`) deletes an event.
+- **Every hook path exits 0.** Nothing the plugin does — a malformed payload, a network
+  failure, a bug — is allowed to surface as an error in the IDE.
+
+## Dev commands
+
+```bash
+cd capture
+pnpm install
+pnpm typecheck   # tsc -b
+pnpm test        # compiles test/ + src/ to dist-test/, then node --test
+```
+
+No runtime dependencies: Node stdlib only (`fs`, `crypto`, `child_process`,
+`readline/promises`, the built-in `fetch`). `typescript`/`@types/node` are the only dev
+dependencies.
+
+### e2e smoke
+
+`test/e2e.test.ts` is skipped unless `TRINITY_E2E_URL` is set. The backend has no
+OAuth-free login, so pairing a device end-to-end also needs a live person session and a
+project that has already selected the fixture's repository
+(`github.com/acme/claude-code-fixture`) — there is no way to get one through the plugin
+alone, so a one-off seed step provides it:
+
+```bash
+# 1. Start a real backend against a dedicated database (never a shared one):
+cd backend
+MCP_API_KEY=... SANDBOX_API_TOKEN=... \
+GOOGLE_OAUTH_CLIENT_ID=... GOOGLE_OAUTH_CLIENT_SECRET=... GOOGLE_OAUTH_STATE_SECRET=... \
+GITHUB_OAUTH_CLIENT_ID=... GITHUB_OAUTH_CLIENT_SECRET=... \
+POSTGRES_URL="postgres://<role>@127.0.0.1:5433/<dedicated-db>?sslmode=disable" \
+go run ./cmd/server
+
+# 2. Seed an org/user/project/member + the selected fixture repo, and mint a session
+#    token (a scratch, uncommitted Go program — see the Task 7.3 report for the source):
+POSTGRES_URL="postgres://<role>@127.0.0.1:5433/<dedicated-db>?sslmode=disable" \
+go run ./cmd/e2eseed
+# → {"orgId":"...","projectId":"...","userId":"...","sessionToken":"...", ...}
+
+# 3. Run the smoke from capture/:
+TRINITY_E2E_URL=http://localhost:3000 \
+TRINITY_E2E_SESSION_TOKEN=<sessionToken> \
+TRINITY_E2E_PROJECT_ID=<projectId> \
+TRINITY_E2E_USER_ID=<userId> \
+TRINITY_E2E_POSTGRES_URL="postgres://<role>@127.0.0.1:5433/<dedicated-db>?sslmode=disable" \
+pnpm test
+```
+
+The smoke pairs a device (`POST /devices/code` then `connect.ts`'s real `exchange()`),
+fetches the capture policy through `send.ts`'s real `refreshPolicy()`, replays the
+`claude_code_session.jsonl` fixture (bundled under `test/testdata/`, byte-identical to
+the backend's Task 5.1 adapter fixture) through the real `outbox.ts`/`send.ts` path, and
+polls the dashboard's sessions endpoint for the projected result.
