@@ -21,6 +21,15 @@ export interface Dialect {
   // vendor ids on any other turn-scoped event still lazily mint — required
   // by dialects whose first observable turn-scoped event isn't this one.
   isPromptSubmit(event: string): boolean;
+  // Gates the stale-policy self-heal refresh and the workspace.observed
+  // synthesis — both are "new session" moments, not necessarily named
+  // "SessionStart" (dialects use their own event vocabulary).
+  isSessionStart(event: string): boolean;
+  // Gates WHETHER this event drains at all (a dialect whose hooks run
+  // synchronously may only want to drain on its own lifecycle boundaries).
+  // drainInline separately governs HOW a drain that does happen behaves
+  // (one bounded batch vs. the open multi-batch default).
+  drainsOn(event: string): boolean;
   allow(event: string): string[];
   drainInline: boolean;
   dataDir(env: NodeJS.ProcessEnv): string | null;
@@ -122,13 +131,11 @@ export async function runHook(d: Dialect, event: string, stdin: string, env: Nod
 
   // Self-healing happens before the gate, not after: routeFor already
   // fails closed on a stale policy, so a refresh attempted only once
-  // send:false has been decided can never run. Scoped to Claude's own
-  // SessionStart event name, matching this behavior pre-extraction — a
-  // dialect with different lifecycle event names normalizes to this
-  // literal name when it maps its own hooks, or this gains a dialect
-  // predicate the way isPromptSubmit already exists for turn-key minting.
+  // send:false has been decided can never run. Scoped to the dialect's own
+  // session-start moment, not a literal event name — hook-core carries no
+  // vendor vocabulary of its own.
   let policy = loadPolicy(dataDir);
-  if (event === "SessionStart") {
+  if (d.isSessionStart(event)) {
     const stale = !policy || Date.now() > policy.fetchedAt + policy.ttlSeconds * 1000;
     if (stale) {
       try {
@@ -160,17 +167,17 @@ export async function runHook(d: Dialect, event: string, stdin: string, env: Nod
   };
   appendEvent(dataDir, captureEvent);
 
-  if (event === "SessionStart") {
+  if (d.isSessionStart(event)) {
     const observed = workspaceObserved(cwd);
     if (observed) {
       appendEvent(dataDir, { ...observed, tool: d.tool, externalSessionId: sessionId, repo: route.canonicalRepo, repoCwd });
     }
   }
 
-  // SessionEnd is synchronous in Claude's own hooks.json (no "async": true,
-  // unlike its four siblings) and stays timeout-bounded by staying
-  // append-only — it never drains.
-  if (event !== "SessionEnd") {
+  // Whether THIS event drains at all is the dialect's call (a synchronous
+  // dialect may only want its own lifecycle boundaries to drain); drainInline
+  // above governs how a drain that does happen behaves.
+  if (d.drainsOn(event)) {
     try {
       await drain(dataDir, cfg, { inline: d.drainInline, deadline: hookEntryDeadline });
     } catch {

@@ -98,17 +98,43 @@ test("an unseen vendor id on a non-prompt turn event lazily mints exactly one ke
 
 // --- id-less fallback: hook-core's generic engine, not any one dialect ---
 
-function fakeDialect(): Dialect {
+function fakeDialect(overrides: Partial<Dialect> = {}): Dialect {
   return {
     tool: "claude_code",
     sessionId: (_event, payload) => (typeof payload.session_id === "string" ? payload.session_id : null),
     cwd: (_event, payload) => (typeof payload.cwd === "string" ? payload.cwd : null),
     vendorTurnId: (_event, payload) => (typeof payload.vendor_turn_id === "string" ? payload.vendor_turn_id : null),
     isPromptSubmit: (event) => event === "PromptSubmit",
+    isSessionStart: () => false,
+    drainsOn: () => true,
     allow: () => ["marker", "vendor_turn_id"],
     drainInline: false,
     dataDir: (env) => env.TEST_HOOK_CORE_DATA_DIR ?? null,
+    ...overrides,
   };
+}
+
+function freshPolicy(): Policy {
+  return {
+    etag: "e1",
+    fetchedAt: Date.now(),
+    ttlSeconds: 900,
+    captureLevel: "metadata",
+    workspaces: [{ canonicalRepo: "github.com/acme/widgets", aliases: [], route: "project:p1" }],
+  };
+}
+
+// A stub that counts fetch attempts and always fails request-level (so
+// drain treats each as "abort" and never actually needs a real endpoint) —
+// what matters for these tests is whether a drain was attempted at all.
+function stubFetchCounting(): { calls: () => number; restore: () => void } {
+  const original = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls++;
+    throw new Error("stub: unreachable by design");
+  }) as typeof fetch;
+  return { calls: () => calls, restore: () => (globalThis.fetch = original) };
 }
 
 test("hook-core: vendor-id events correlate out of order; id-less events fall back to latest", async () => {
@@ -154,4 +180,53 @@ test("hook-core: vendor-id events correlate out of order; id-less events fall ba
   const kIdless = byMarker("prompt-idless")?.turnKey;
   assert.ok(kIdless, "the id-less prompt-submit must still mint (via latest)");
   assert.equal(byMarker("tool-idless")?.turnKey, kIdless, "an id-less non-prompt event must fall back to latest");
+});
+
+// --- drainsOn: WHETHER an event drains at all is the dialect's call ---
+
+test("hook-core: drainsOn, not a literal event name, gates whether an event attempts a network drain", async () => {
+  const dataDir = tmpDataDir();
+  const cfg: DeviceConfig = { token: "tok", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev1" };
+  saveConfig(dataDir, cfg);
+  savePolicy(dataDir, freshPolicy());
+  const repo = initRepo("git@github.com:acme/widgets.git");
+
+  // Deliberately not Claude's vocabulary: drains on "X" only, the opposite
+  // shape of Claude's "everything but SessionEnd".
+  const dialect = fakeDialect({ drainsOn: (event) => event === "X" });
+  const env = { ...process.env, TEST_HOOK_CORE_DATA_DIR: dataDir };
+  const send = (event: string) => runHook(dialect, event, JSON.stringify({ session_id: "s1", cwd: repo }), env);
+
+  const { calls, restore } = stubFetchCounting();
+  try {
+    await send("X");
+    assert.equal(calls(), 1, "drainsOn(true) must attempt a drain");
+
+    await send("Y");
+    assert.equal(calls(), 1, "drainsOn(false) must skip the drain entirely — no new fetch");
+  } finally {
+    restore();
+  }
+});
+
+// --- isSessionStart: gates the self-heal refresh + workspace.observed synthesis ---
+
+test("hook-core: isSessionStart, not a literal event name, gates the workspace.observed synthesis", async () => {
+  const dataDir = tmpDataDir();
+  const cfg: DeviceConfig = { token: "tok", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev1" };
+  saveConfig(dataDir, cfg);
+  savePolicy(dataDir, freshPolicy());
+  const repo = initRepo("git@github.com:acme/widgets.git");
+
+  // Deliberately not "SessionStart": proves the synthesis follows the
+  // predicate, not the string.
+  const dialect = fakeDialect({ isSessionStart: (event) => event === "Begin", drainsOn: () => false });
+  const env = { ...process.env, TEST_HOOK_CORE_DATA_DIR: dataDir };
+  const send = (event: string) => runHook(dialect, event, JSON.stringify({ session_id: "s1", cwd: repo }), env);
+
+  await send("Begin");
+  assert.equal(readdirSync(join(dataDir, "outbox")).length, 2, "isSessionStart(true) must synthesize workspace.observed alongside the main event");
+
+  await send("Other");
+  assert.equal(readdirSync(join(dataDir, "outbox")).length, 3, "isSessionStart(false) must add only the main event, no workspace.observed");
 });

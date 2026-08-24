@@ -36,6 +36,11 @@ export const claudeCodeDialect: Dialect = {
   cwd: (_event, payload) => str(payload, "cwd"),
   vendorTurnId: (_event, payload) => str(payload, "prompt_id"),
   isPromptSubmit: (event) => event === "UserPromptSubmit",
+  isSessionStart: (event) => event === "SessionStart",
+  // SessionEnd is the one hook hooks.json runs synchronously (no "async":
+  // true, unlike its four siblings) — it must stay append-only and
+  // timeout-bounded, so it's the one event that never drains.
+  drainsOn: (event) => event !== "SessionEnd",
   allow: (event) => [...ALLOW_EVERY_EVENT, ...(ALLOW_PER_EVENT[event] ?? [])],
   // Async-capable: four of Claude's five hooks run detached ("async": true
   // in hooks.json), so the open multi-batch drain in hook-core is fine.
