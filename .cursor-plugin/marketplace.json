@@ -1,0 +1,17 @@
+{
+  "name": "trinity",
+  "owner": {
+    "name": "Trinity"
+  },
+  "metadata": {
+    "description": "Trinity's Cursor plugins."
+  },
+  "plugins": [
+    {
+      "name": "trinity-capture",
+      "description": "Captures Cursor CLI sessions into Trinity for allowlisted repositories.",
+      "version": "0.1.0",
+      "source": "./cursor"
+    }
+  ]
+}
