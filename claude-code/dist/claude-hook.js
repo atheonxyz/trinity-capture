@@ -68,7 +68,7 @@ export async function runHook(eventName, input, dataDir) {
     const cachedRoute = matchRoute(policy, gitRemote);
     if (!cachedRoute.send)
         return;
-    if (eventName === "SessionStart" && !isPolicyFresh(policy, Date.now())) {
+    if (!isPolicyFresh(policy, Date.now())) {
         try {
             policy = await refreshPolicy(dataDir, cfg);
         }
@@ -99,13 +99,11 @@ export async function runHook(eventName, input, dataDir) {
             appendEvent(dataDir, { ...observed, externalSessionId: sessionId, repo: route.canonicalRepo, repoCwd });
         }
     }
-    if (eventName !== "SessionEnd") {
-        try {
-            await drain(dataDir, cfg);
-        }
-        catch {
-            return;
-        }
+    try {
+        await drain(dataDir, cfg);
+    }
+    catch {
+        return;
     }
 }
 async function cli() {

@@ -48,9 +48,9 @@ committed `claude-hook.js` directly, so a stale or missing dist fails the suite.
 
 Every hook invocation is a fresh, short-lived process — there is no daemon and nothing
 runs between hook events. `claude-hook.ts` reads the hook's stdin JSON, checks the gate,
-filters the payload to the capture level, appends it to the local outbox, and (except on
-`SessionEnd`, which stays append-only and synchronous to respect its tight timeout
-budget) drains the outbox to the backend. One synthesized event, `workspace.observed`,
+filters the payload to the capture level, appends it to the local outbox, and makes a
+bounded attempt to drain the outbox to the backend. One synthesized event,
+`workspace.observed`,
 supplements the native ones at `SessionStart`: bounded, deterministic git metadata
 (branch, HEAD SHA, dirty flag, diffstat, changed files) that the server can never read
 directly.
@@ -96,8 +96,9 @@ designed extension, not implemented yet.
 - **The outbox cannot wedge.** An event over 256 KiB serialized (the server's per-item
   cap) is dropped at append. Batches are assembled under a ~3 MiB byte budget as well
   as the 100-event cap, so a 413 means a genuinely poisoned batch — it is bisected
-  until the poisoned event stands alone, and that one event is dropped. Events
-  retried for over 7 days are dropped too. Every such drop is recorded in the plugin
+  until the poisoned event stands alone, and that one event is dropped. The outbox
+  evicts its oldest events beyond 16 MiB or 2,000 items, and events retried for over
+  7 days are dropped too. Every such drop is recorded in the plugin
   data dir's `status.json` (most recent 100), never silently. A `policy_stale` item
   outcome triggers one immediate policy refresh so the next drain retries against a
   current document.

@@ -18,7 +18,7 @@ export interface CaptureEvent {
 
 export interface DropRecord {
   at: string;
-  reason: "oversized" | "poison" | "expired";
+  reason: "oversized" | "poison" | "expired" | "capacity";
   captureEventId: string;
   kind: string;
 }
@@ -28,6 +28,8 @@ const MAX_EVENTS_PER_BATCH = 100;
 const MAX_EVENT_BYTES = 256 * 1024;
 const MAX_BATCH_BYTES = 3 * 1024 * 1024;
 const MAX_RETRY_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const MAX_OUTBOX_EVENTS = 2_000;
+const MAX_OUTBOX_BYTES = 16 * 1024 * 1024;
 const MAX_DROP_RECORDS = 100;
 
 interface OutboxEntry {
@@ -74,6 +76,37 @@ function recordDrop(dataDir: string, drop: Omit<DropRecord, "at">): void {
   }
 }
 
+function enforceOutboxLimit(dataDir: string, dir: string): void {
+  const entries: { file: string; bytes: number }[] = [];
+  let totalBytes = 0;
+  for (const file of readdirSync(dir).filter((name) => name.endsWith(".jsonl")).sort()) {
+    try {
+      const bytes = statSync(join(dir, file)).size;
+      entries.push({ file, bytes });
+      totalBytes += bytes;
+    } catch (err) {
+      if (!(err instanceof Error)) throw err;
+    }
+  }
+
+  while (entries.length > MAX_OUTBOX_EVENTS || totalBytes > MAX_OUTBOX_BYTES) {
+    const oldest = entries.shift();
+    if (!oldest) return;
+    const path = join(dir, oldest.file);
+    let event: CaptureEvent | null = null;
+    try {
+      event = JSON.parse(readFileSync(path, "utf8")) as CaptureEvent;
+    } catch (err) {
+      if (!(err instanceof Error)) throw err;
+    }
+    rmSync(path, { force: true });
+    totalBytes -= oldest.bytes;
+    if (event) {
+      recordDrop(dataDir, { reason: "capacity", captureEventId: event.captureEventId, kind: event.kind });
+    }
+  }
+}
+
 export function appendEvent(dataDir: string, ev: CaptureEvent): void {
   const line = JSON.stringify(ev) + "\n";
   if (Buffer.byteLength(line, "utf8") > MAX_EVENT_BYTES) {
@@ -87,6 +120,7 @@ export function appendEvent(dataDir: string, ev: CaptureEvent): void {
     if (isAlreadyQueued(err)) return;
     throw err;
   }
+  enforceOutboxLimit(dataDir, dir);
 }
 
 export async function drain(dataDir: string, cfg: DeviceConfig): Promise<void> {

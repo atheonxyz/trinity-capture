@@ -73,7 +73,7 @@ export async function runHook(eventName: string, input: HookInput, dataDir: stri
   let policy = loadPolicy(dataDir);
   const cachedRoute = matchRoute(policy, gitRemote);
   if (!cachedRoute.send) return;
-  if (eventName === "SessionStart" && !isPolicyFresh(policy, Date.now())) {
+  if (!isPolicyFresh(policy, Date.now())) {
     try {
       policy = await refreshPolicy(dataDir, cfg);
     } catch {
@@ -107,12 +107,10 @@ export async function runHook(eventName: string, input: HookInput, dataDir: stri
     }
   }
 
-  if (eventName !== "SessionEnd") {
-    try {
-      await drain(dataDir, cfg);
-    } catch {
-      return;
-    }
+  try {
+    await drain(dataDir, cfg);
+  } catch {
+    return;
   }
 }
 

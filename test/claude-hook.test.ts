@@ -178,7 +178,7 @@ test("UserPromptSubmit mints a turnKey the following events carry until the next
   assert.equal(byKind("SessionEnd")[0].turnKey, prompt2.turnKey, "SessionEnd still carries the latest prompt's key");
 });
 
-test("a stale policy is refreshed only after the cached allowlist matches", async () => {
+test("a later hook refreshes stale policy after the cached allowlist matches", async () => {
   const dataDir = tmpDataDir();
   saveDevicePolicy(dataDir, 0);
   const repo = initWidgetsRepo();
@@ -199,13 +199,38 @@ test("a stale policy is refreshed only after the cached allowlist matches", asyn
     },
   });
   try {
-    await runHook("SessionStart", { ...sessionStartInput, cwd: repo }, dataDir);
+    await runHook("PostToolUse", { session_id: "s1", cwd: repo, tool_name: "Read" }, dataDir);
   } finally {
     restore();
   }
 
   assert.equal(policyCalls, 1);
-  assert.equal(outboxFiles(dataDir).length, 2, "the refreshed policy should have let this SessionStart pass the gate");
+  assert.equal(outboxFiles(dataDir).length, 1, "the refreshed policy should let the later event pass the gate");
+});
+
+test("SessionEnd makes a final drain attempt", async () => {
+  const dataDir = tmpDataDir();
+  saveDevicePolicy(dataDir, Date.now());
+  const repo = initWidgetsRepo();
+
+  let batchCalls = 0;
+  const restore = stubFetch({
+    onBatch: (items) => {
+      batchCalls++;
+      return new Response(
+        JSON.stringify({ results: items.map((item) => ({ captureEventId: item.captureEventId, outcome: "stored" })) }),
+        { status: 200 },
+      );
+    },
+  });
+  try {
+    await runHook("SessionEnd", { session_id: "s1", cwd: repo, reason: "other" }, dataDir);
+  } finally {
+    restore();
+  }
+
+  assert.equal(batchCalls, 1);
+  assert.equal(outboxFiles(dataDir).length, 0);
 });
 
 test("a failed policy refresh still fails closed", async () => {
