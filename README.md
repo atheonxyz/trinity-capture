@@ -285,7 +285,7 @@ this side.
 | `hook_event_name` | Registered hook | Backend applier | Forwarded fields | Notes |
 | --- | --- | --- | --- | --- |
 | `sessionStart` | yes | `applySessionStart` | `hook_event_name`, `conversation_id`, `generation_id`, `model` | `sessionId` = `conversation_id`; `vendorTurnId` = null (session-scoped, despite carrying `generation_id`) |
-| `beforeSubmitPrompt` | yes | `applyPromptSubmitted` | `hook_event_name`, `conversation_id`, `generation_id`, `prompt` | preferred turn-key mint point; the fixture's first turn has none — `postToolUse` mints instead (lazy mint) |
+| `beforeSubmitPrompt` | yes | `applyPromptSubmitted` | `hook_event_name`, `conversation_id`, `generation_id`, `prompt` | preferred turn-key mint point; the fixture's first turn has none — `preToolUse` (its first turn-scoped event) mints instead (lazy mint) |
 | `preToolUse` | yes | quarantine | `hook_event_name`, `conversation_id`, `generation_id` | genuinely captured, never forwards `tool_input` |
 | `beforeReadFile` | yes | quarantine | `hook_event_name`, `conversation_id`, `generation_id` | genuinely captured, never forwards `content` or `file_path` |
 | `postToolUse` | yes | `applyToolUsed` | `hook_event_name`, `conversation_id`, `generation_id`, `tool_name`, `tool_use_id` | never forwards `tool_input`/`tool_output` |
