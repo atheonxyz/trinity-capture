@@ -7,5 +7,14 @@
     "declaration": false,
     "incremental": false
   },
-  "include": ["src/**/*.ts"]
+  "include": [
+    "src/config.ts",
+    "src/gate.ts",
+    "src/outbox.ts",
+    "src/send.ts",
+    "src/observe.ts",
+    "src/hook-core.ts",
+    "src/claude-hook.ts",
+    "src/connect.ts"
+  ]
 }
