@@ -35,6 +35,35 @@ function outboxFiles(dataDir: string): string[] {
   return existsSync(dir) ? readdirSync(dir) : [];
 }
 
+// Distinguishes the policy GET from the batches POST so a single stub can
+// answer both calls a SessionStart invocation may make. onBatch defaults to
+// retry_later so appended events are left in the outbox for inspection.
+function stubFetch(opts: {
+  onPolicy?: () => Response;
+  onBatch?: (items: { captureEventId: string }[]) => Response;
+}): () => void {
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+    const href = String(url);
+    if (href.endsWith("/policy")) {
+      if (!opts.onPolicy) throw new Error(`unexpected policy fetch: ${href}`);
+      return opts.onPolicy();
+    }
+    if (href.endsWith("/batches")) {
+      const body = JSON.parse(String(init?.body)) as { items: { captureEventId: string }[] };
+      if (opts.onBatch) return opts.onBatch(body.items);
+      return new Response(
+        JSON.stringify({ results: body.items.map((i) => ({ captureEventId: i.captureEventId, outcome: "retry_later" })) }),
+        { status: 200 },
+      );
+    }
+    throw new Error(`unexpected fetch: ${href}`);
+  }) as typeof fetch;
+  return () => {
+    globalThis.fetch = original;
+  };
+}
+
 const sessionStartInput = {
   session_id: "s1",
   hook_event_name: "SessionStart",
@@ -112,4 +141,94 @@ test("PostToolUse strips tool_input/tool_output but keeps tool_name/tool_use_id"
 
   const parsed = JSON.parse(raw) as { repoCwd: string };
   assert.equal(parsed.repoCwd, ".", "cwd at the repo root should be reported as '.', not an absolute or ../-laden path");
+});
+
+test("a stale policy is refreshed before the gate, and the refresh is what this invocation gates on", async () => {
+  const dataDir = tmpDataDir();
+  const cfg: DeviceConfig = { token: "tok", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev1" };
+  saveConfig(dataDir, cfg);
+  // Stale AND missing this repo entirely — simulating a project selecting
+  // the repo only after this device's cached policy went stale. Only a
+  // refresh performed before the gate can let this SessionStart through.
+  savePolicy(dataDir, { etag: "old", fetchedAt: 0, ttlSeconds: 900, captureLevel: "metadata", workspaces: [] });
+  const repo = initRepo("git@github.com:acme/widgets.git");
+
+  let policyCalls = 0;
+  const restore = stubFetch({
+    onPolicy: () => {
+      policyCalls++;
+      return new Response(
+        JSON.stringify({
+          etag: "new",
+          ttlSeconds: 900,
+          captureLevel: "metadata",
+          workspaces: [{ canonicalRepo: "github.com/acme/widgets", aliases: [], route: "project:p1" }],
+        }),
+        { status: 200 },
+      );
+    },
+  });
+  try {
+    await runHook("SessionStart", { ...sessionStartInput, cwd: repo }, dataDir);
+  } finally {
+    restore();
+  }
+
+  assert.equal(policyCalls, 1);
+  assert.equal(outboxFiles(dataDir).length, 2, "the refreshed policy should have let this SessionStart pass the gate");
+});
+
+test("a failed policy refresh still fails closed", async () => {
+  const dataDir = tmpDataDir();
+  const cfg: DeviceConfig = { token: "tok", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev1" };
+  saveConfig(dataDir, cfg);
+  savePolicy(dataDir, {
+    etag: "old",
+    fetchedAt: 0,
+    ttlSeconds: 900,
+    captureLevel: "metadata",
+    workspaces: [{ canonicalRepo: "github.com/acme/widgets", aliases: [], route: "project:p1" }],
+  });
+  const repo = initRepo("git@github.com:acme/widgets.git");
+
+  const original = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    throw new Error("network down");
+  }) as typeof fetch;
+  try {
+    await assert.doesNotReject(runHook("SessionStart", { ...sessionStartInput, cwd: repo }, dataDir));
+  } finally {
+    globalThis.fetch = original;
+  }
+
+  assert.equal(outboxFiles(dataDir).length, 0, "an expired policy whose refresh failed must still fail closed");
+});
+
+test("a fresh policy is not refetched", async () => {
+  const dataDir = tmpDataDir();
+  const cfg: DeviceConfig = { token: "tok", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev1" };
+  saveConfig(dataDir, cfg);
+  savePolicy(dataDir, {
+    etag: "e1",
+    fetchedAt: Date.now(),
+    ttlSeconds: 900,
+    captureLevel: "metadata",
+    workspaces: [{ canonicalRepo: "github.com/acme/widgets", aliases: [], route: "project:p1" }],
+  });
+  const repo = initRepo("git@github.com:acme/widgets.git");
+
+  let policyCalls = 0;
+  const restore = stubFetch({
+    onPolicy: () => {
+      policyCalls++;
+      return new Response("{}", { status: 200 });
+    },
+  });
+  try {
+    await runHook("SessionStart", { ...sessionStartInput, cwd: repo }, dataDir);
+  } finally {
+    restore();
+  }
+
+  assert.equal(policyCalls, 0, "a fresh (non-expired) policy must not trigger a refresh fetch");
 });

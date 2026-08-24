@@ -51,10 +51,27 @@ export async function runHook(eventName: string, input: HookInput, dataDir: stri
   const cfg = loadConfig(dataDir);
   if (!cfg) return; // never authorized — fail closed, zero network requests
 
+  // Self-healing happens before the gate, not after: routeFor already fails
+  // closed on a stale policy, so a refresh attempted only once send:false
+  // has been decided can never run — the device would stay stuck past its
+  // last-synced TTL until someone re-ran /trinity-connect. Scoped to
+  // SessionStart (new-session cadence is enough to self-heal, and it keeps
+  // SessionEnd's no-network, append-only, timeout-bounded contract intact).
+  let policy = loadPolicy(dataDir);
+  if (eventName === "SessionStart") {
+    const stale = !policy || Date.now() > policy.fetchedAt + policy.ttlSeconds * 1000;
+    if (stale) {
+      try {
+        policy = await refreshPolicy(dataDir, cfg);
+      } catch {
+        // best-effort: routeFor below still fails closed on whatever policy we have
+      }
+    }
+  }
+
   const cwd = input.cwd ?? process.cwd();
-  const policy = loadPolicy(dataDir);
   const route = routeFor(policy, Date.now(), gitRemoteOf(cwd));
-  if (!route.send) return; // not allowlisted, or policy missing/stale — zero network requests
+  if (!route.send) return; // not allowlisted, or policy missing/still stale — no event, no drain
 
   const sessionId = input.session_id ?? "";
   const repoCwd = repoRelativeCwd(cwd);
@@ -74,14 +91,6 @@ export async function runHook(eventName: string, input: HookInput, dataDir: stri
     const observed = workspaceObserved(cwd);
     if (observed) {
       appendEvent(dataDir, { ...observed, externalSessionId: sessionId, repo: route.canonicalRepo, repoCwd });
-    }
-    const stale = !policy || Date.now() > policy.fetchedAt + policy.ttlSeconds * 1000;
-    if (stale) {
-      try {
-        await refreshPolicy(dataDir, cfg);
-      } catch {
-        // best-effort: keep operating on the existing (possibly stale) policy
-      }
     }
   }
 

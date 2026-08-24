@@ -4,7 +4,7 @@ import { createInterface } from "node:readline/promises";
 import { saveConfig } from "./config.js";
 import type { DeviceConfig } from "./config.js";
 
-const DEFAULT_BASE_URL = "https://app.trinity.dev";
+const DEFAULT_BASE_URL = "https://api.usetrinity.ai";
 
 async function promptForCode(): Promise<string> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
