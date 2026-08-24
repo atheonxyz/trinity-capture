@@ -7,11 +7,10 @@ plugin per coding product. Claude Code ships in Phase 1; Codex and Cursor are de
 ## Setup (Claude Code)
 
 1. Install the `trinity-capture` plugin from the Claude Code marketplace.
-2. In any project, run `/trinity-connect` and paste the pairing code shown on your
-   Trinity dashboard's IDE integrations page (or pass it directly:
-   `/trinity-connect ABCD1234EFGH`). This exchanges the code for a device token and
-   writes it to the plugin's own data directory — never into the repo, never into shell
-   history.
+2. In any project, run `/trinity-connect <code>` with the pairing code shown on your
+   Trinity dashboard's IDE integrations page (e.g. `/trinity-connect ABCD1234EFGH`).
+   This exchanges the code for a device token and writes it to the plugin's own data
+   directory — never into the repo, never into shell history.
 3. That's it. The plugin captures sessions automatically for every repository one of
    your projects has selected; everything else produces zero network traffic (see
    **Fail-closed guarantees** below).
@@ -34,8 +33,15 @@ capture/
 └── claude-code/
     ├── .claude-plugin/plugin.json
     ├── hooks/hooks.json     registers the five lifecycle hooks
-    └── commands/trinity-connect.md
+    ├── commands/trinity-connect.md
+    └── dist/                the COMMITTED build the installed plugin executes
 ```
+
+`claude-code/dist/` is committed on purpose: an installed plugin runs whatever sits at
+`${CLAUDE_PLUGIN_ROOT}/dist`, with no build step of its own. `pnpm build:plugin`
+regenerates it from `src/` (plain ESM, no bundler, no runtime dependencies) — rerun it
+and commit the output whenever `src/` changes. `test/packaging.test.ts` executes the
+committed `claude-hook.js` directly, so a stale or missing dist fails the suite.
 
 Every hook invocation is a fresh, short-lived process — there is no daemon and nothing
 runs between hook events. `claude-hook.ts` reads the hook's stdin JSON, checks the gate,
@@ -46,16 +52,24 @@ supplements the native ones at `SessionStart`: bounded, deterministic git metada
 (branch, HEAD SHA, dirty flag, diffstat, changed files) that the server can never read
 directly.
 
+Turn identity is plugin-minted: every `UserPromptSubmit` mints a fresh uuid, persisted
+per session under the plugin data dir (`turnkeys/`), and every later event of that
+session carries it as the envelope's `turnKey` until the next prompt replaces it
+(`SessionStart` and `workspace.observed` carry none). The server treats it as an
+untrusted hint and falls back to open-turn-by-ordinal when it is absent.
+
 ## Capture levels
 
 Phase 1 supports exactly one capture level, `metadata`, for every project:
 
-- Prompts (`user_input`) and assistant responses (`last_assistant_message`) are sent in
+- Prompts (`prompt`) and assistant responses (`last_assistant_message`) are sent in
   full — they're the session's substance.
-- Tool calls are sent as metadata only: `tool_name` and `tool_use_id`, never
-  `tool_input`/`tool_output`.
-- Any field whose name contains "reasoning" or "thinking" is never sent, regardless of
-  event or capture level.
+- Everything else rides an ALLOWLIST, never a strip list: per event, only known-safe
+  keys observed on a real captured hook stream are forwarded (`tool_name`,
+  `tool_use_id`, `duration_ms`, session/timing ids). Tool call bodies never travel,
+  whatever the vendor calls them today or tomorrow (`tool_input`, `tool_response`, the
+  older `tool_output`) — and neither does any field the allowlist has not heard of,
+  which is what keeps reasoning/thinking-named fields out by construction.
 
 A `full-bodies` level (bounded, redacted tool call bodies, opt-in per project) is a
 designed extension, not implemented yet.
@@ -76,6 +90,14 @@ designed extension, not implemented yet.
   I/O. A request-level failure (network error, 401/403/429/5xx) retains the entire
   outbox for retry; only a definitive per-item outcome (`stored`, `duplicate`, or
   `rejected_permanent`) deletes an event.
+- **The outbox cannot wedge.** An event over 256 KiB serialized (the server's per-item
+  cap) is dropped at append. Batches are assembled under a ~3 MiB byte budget as well
+  as the 100-event cap, so a 413 means a genuinely poisoned batch — it is bisected
+  until the poisoned event stands alone, and that one event is dropped. Events
+  retried for over 7 days are dropped too. Every such drop is recorded in the plugin
+  data dir's `status.json` (most recent 100), never silently. A `policy_stale` item
+  outcome triggers one immediate policy refresh so the next drain retries against a
+  current document.
 - **Every hook path exits 0.** Nothing the plugin does — a malformed payload, a network
   failure, a bug — is allowed to surface as an error in the IDE.
 
@@ -84,13 +106,13 @@ designed extension, not implemented yet.
 ```bash
 cd capture
 pnpm install
-pnpm typecheck   # tsc -b
-pnpm test        # compiles test/ + src/ to dist-test/, then node --test
+pnpm typecheck      # tsc -b
+pnpm test           # run pnpm typecheck first: node --test executes dist-test/
+pnpm build:plugin   # regenerate the committed claude-code/dist/ from src/
 ```
 
-No runtime dependencies: Node stdlib only (`fs`, `crypto`, `child_process`,
-`readline/promises`, the built-in `fetch`). `typescript`/`@types/node` are the only dev
-dependencies.
+No runtime dependencies: Node stdlib only (`fs`, `crypto`, `child_process`, the
+built-in `fetch`). `typescript`/`@types/node` are the only dev dependencies.
 
 ### e2e smoke
 

@@ -1,20 +1,12 @@
-// The `/trinity-connect` command: prompts for a pairing code, calls
-// POST /devices/exchange, writes the resulting DeviceConfig (spec §4.1).
-import { createInterface } from "node:readline/promises";
+// The `/trinity-connect <code>` command: takes the pairing code as its one
+// argument (never interactively — the command runs under a non-interactive
+// `!` shell), calls POST /devices/exchange, writes the resulting
+// DeviceConfig (spec §4.1).
 import { pathToFileURL } from "node:url";
 import { saveConfig } from "./config.js";
 import type { DeviceConfig } from "./config.js";
 
 const DEFAULT_BASE_URL = "https://api.usetrinity.ai";
-
-async function promptForCode(): Promise<string> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    return (await rl.question("Enter the pairing code shown in the Trinity dashboard: ")).trim();
-  } finally {
-    rl.close();
-  }
-}
 
 // Exported for the e2e smoke test, which drives this exact call against a
 // real backend rather than a raw fetch of its own.
@@ -44,10 +36,9 @@ async function main(): Promise<void> {
   }
 
   const baseUrl = process.env.TRINITY_BASE_URL ?? DEFAULT_BASE_URL;
-  const argCode = process.argv[2]?.trim();
-  const code = argCode && argCode.length > 0 ? argCode : await promptForCode();
-  if (!code) {
-    console.error("No pairing code provided.");
+  const code = process.argv[2]?.trim() ?? "";
+  if (code === "") {
+    console.error("No pairing code provided. Usage: /trinity-connect <pairing-code>");
     process.exitCode = 1;
     return;
   }

@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc -b",
+    "build:plugin": "tsc -p tsconfig.plugin.json",
     "test": "node --test dist-test/**/*.test.js"
   },
   "devDependencies": {
