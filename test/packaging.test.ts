@@ -46,6 +46,17 @@ test("the committed hook binary exists where hooks.json points", () => {
   assert.ok(existsSync(hookBin), `${hookBin} is missing — run pnpm build:plugin and commit the output`);
 });
 
+test("hook commands use path-safe exec form", () => {
+  const manifest = JSON.parse(readFileSync(join(process.cwd(), "claude-code", "hooks", "hooks.json"), "utf8")) as {
+    hooks: Record<string, { hooks: { command: string; args?: string[] }[] }[]>;
+  };
+  for (const [eventName, groups] of Object.entries(manifest.hooks)) {
+    const handler = groups[0]?.hooks[0];
+    assert.equal(handler?.command, "node");
+    assert.deepEqual(handler?.args, ["${CLAUDE_PLUGIN_ROOT}/dist/claude-hook.js", eventName]);
+  }
+});
+
 test("committed binary, unauthorized device: exits 0 and writes nothing", () => {
   const dataDir = mkdtempSync(join(tmpdir(), "trinity-pkg-data-"));
   runHookBinary(dataDir, readFileSync(dialectStdinPath, "utf8"));
@@ -108,7 +119,8 @@ test("the repo-root marketplace manifest names trinity-capture at the packaged p
 test("the connect command is manual-only and passes one pairing-code argument", () => {
   const command = readFileSync(join(process.cwd(), "claude-code", "commands", "trinity-connect.md"), "utf8");
   assert.match(command, /^argument-hint: \[pairing-code\]$/m);
+  assert.match(command, /^arguments: \[pairing_code\]$/m);
   assert.match(command, /^disable-model-invocation: true$/m);
-  assert.match(command, /dist\/connect\.js" "\$1"/);
-  assert.doesNotMatch(command, /\$ARGUMENTS/);
+  assert.match(command, /dist\/connect\.js" "\$pairing_code"/);
+  assert.doesNotMatch(command, /\$ARGUMENTS|\$[0-9]/);
 });
