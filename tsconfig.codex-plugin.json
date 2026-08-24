@@ -2,7 +2,7 @@
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "src",
-    "outDir": "claude-code/dist",
+    "outDir": "codex/dist",
     "composite": false,
     "declaration": false,
     "incremental": false
@@ -14,7 +14,7 @@
     "src/outbox.ts",
     "src/observe.ts",
     "src/send.ts",
-    "src/claude-hook.ts",
-    "src/connect.ts"
+    "src/codex-hook.ts",
+    "src/codex-connect.ts"
   ]
 }

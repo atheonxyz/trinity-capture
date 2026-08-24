@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import type { Dialect } from "./hook-core.js";
 import { runHook } from "./hook-core.js";
+import { codexHome, promotePendingConfig } from "./codex-connect.js";
 
 function str(payload: Record<string, unknown>, key: string): string | null {
   const value = payload[key];
@@ -60,6 +61,21 @@ async function cli(): Promise<void> {
   const eventName = process.argv[2];
   if (!eventName) return;
   const stdin = readFileSync(0, "utf8");
+
+  // The connect skill's shell command has no PLUGIN_DATA (C2.0); this hook
+  // COMMAND does, so it's the one that promotes a pending pairing on its
+  // way through — cheap when nothing is pending, and best-effort: a
+  // promotion failure must never surface to the IDE.
+  if (eventName === "PostToolUse") {
+    try {
+      const dataDir = codexDialect.dataDir(process.env);
+      if (dataDir) promotePendingConfig(codexHome(process.env), dataDir);
+    } catch {
+      // malformed pending file, unwritable PLUGIN_DATA, etc. — leave the
+      // pending record for the next PostToolUse to retry
+    }
+  }
+
   await runHook(codexDialect, eventName, stdin, process.env);
 }
 
