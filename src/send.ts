@@ -9,6 +9,15 @@ export interface ItemResult {
   code?: string;
 }
 
+// BatchRequestError carries the HTTP status so the outbox can tell a
+// poisoned batch (413, worth bisecting) from a failure that retains the
+// whole outbox.
+export class BatchRequestError extends Error {
+  constructor(readonly status: number) {
+    super(`ingest batch failed: ${status}`);
+  }
+}
+
 // Throws on request-level failure (network error or non-2xx) so the caller
 // can retain the whole outbox rather than mis-acking individual items.
 export async function sendBatch(cfg: DeviceConfig, events: CaptureEvent[]): Promise<ItemResult[]> {
@@ -21,7 +30,7 @@ export async function sendBatch(cfg: DeviceConfig, events: CaptureEvent[]): Prom
     },
     body: JSON.stringify({ items: events }),
   });
-  if (!res.ok) throw new Error(`ingest batch failed: ${res.status}`);
+  if (!res.ok) throw new BatchRequestError(res.status);
   const body = (await res.json()) as { results: ItemResult[] };
   return body.results;
 }
