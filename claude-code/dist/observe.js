@@ -28,7 +28,7 @@ export function repoRelativeCwd(cwd) {
         resolvedCwd = realpathSync(cwd);
     }
     catch {
-        // cwd may not exist on disk in edge cases — fall back to the raw path
+        resolvedCwd = cwd;
     }
     const rel = relative(top, resolvedCwd);
     return rel === "" ? "." : rel;

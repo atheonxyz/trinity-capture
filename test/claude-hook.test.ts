@@ -7,6 +7,9 @@ import { join } from "node:path";
 import { runHook } from "../src/claude-hook.js";
 import { saveConfig, savePolicy } from "../src/config.js";
 
+const WIDGETS_REMOTE = "git@github.com:acme/widgets.git";
+const WIDGETS_WORKSPACE = { canonicalRepo: "github.com/acme/widgets", aliases: [], route: "project:p1" };
+
 function tmpDataDir(): string {
   return mkdtempSync(join(tmpdir(), "trinity-data-"));
 }
@@ -21,10 +24,10 @@ function gitEnv(): NodeJS.ProcessEnv {
   };
 }
 
-function initRepo(remote: string): string {
+function initWidgetsRepo(): string {
   const dir = mkdtempSync(join(tmpdir(), "trinity-repo-"));
   execFileSync("git", ["init", "-q", "-b", "main"], { cwd: dir });
-  execFileSync("git", ["remote", "add", "origin", remote], { cwd: dir });
+  execFileSync("git", ["remote", "add", "origin", WIDGETS_REMOTE], { cwd: dir });
   execFileSync("git", ["commit", "--allow-empty", "-q", "-m", "init"], { cwd: dir, env: gitEnv() });
   return dir;
 }
@@ -41,7 +44,7 @@ function saveDevicePolicy(dataDir: string, fetchedAt: number): void {
     fetchedAt,
     ttlSeconds: 900,
     captureLevel: "metadata",
-    workspaces: [{ canonicalRepo: "github.com/acme/widgets", aliases: [], route: "project:p1" }],
+    workspaces: [WIDGETS_WORKSPACE],
   });
 }
 
@@ -82,7 +85,7 @@ test("SessionStart in an allowlisted repo appends the session event and workspac
   const dataDir = tmpDataDir();
   saveDevicePolicy(dataDir, Date.now());
 
-  const repo = initRepo("git@github.com:acme/widgets.git");
+  const repo = initWidgetsRepo();
 
   await runHook("SessionStart", { ...sessionStartInput, cwd: repo }, dataDir);
 
@@ -91,7 +94,7 @@ test("SessionStart in an allowlisted repo appends the session event and workspac
 
 test("the same fixture with no config file appends nothing and never throws", async () => {
   const dataDir = tmpDataDir();
-  const repo = initRepo("git@github.com:acme/widgets.git");
+  const repo = initWidgetsRepo();
 
   await assert.doesNotReject(runHook("SessionStart", { ...sessionStartInput, cwd: repo }, dataDir));
 
@@ -101,7 +104,7 @@ test("the same fixture with no config file appends nothing and never throws", as
 test("PostToolUse forwards only allowlisted metadata — no tool bodies under any name, no local paths", async () => {
   const dataDir = tmpDataDir();
   saveDevicePolicy(dataDir, Date.now());
-  const repo = initRepo("git@github.com:acme/widgets.git");
+  const repo = initWidgetsRepo();
 
   await runHook(
     "PostToolUse",
@@ -143,7 +146,7 @@ test("PostToolUse forwards only allowlisted metadata — no tool bodies under an
 test("UserPromptSubmit mints a turnKey the following events carry until the next prompt", async () => {
   const dataDir = tmpDataDir();
   saveDevicePolicy(dataDir, Date.now());
-  const repo = initRepo("git@github.com:acme/widgets.git");
+  const repo = initWidgetsRepo();
 
   interface OutboxEvent {
     kind: string;
@@ -178,7 +181,7 @@ test("UserPromptSubmit mints a turnKey the following events carry until the next
 test("a stale policy is refreshed only after the cached allowlist matches", async () => {
   const dataDir = tmpDataDir();
   saveDevicePolicy(dataDir, 0);
-  const repo = initRepo("git@github.com:acme/widgets.git");
+  const repo = initWidgetsRepo();
 
   let policyCalls = 0;
   const restore = stubFetch({
@@ -189,7 +192,7 @@ test("a stale policy is refreshed only after the cached allowlist matches", asyn
           etag: "new",
           ttlSeconds: 900,
           captureLevel: "metadata",
-          workspaces: [{ canonicalRepo: "github.com/acme/widgets", aliases: [], route: "project:p1" }],
+          workspaces: [WIDGETS_WORKSPACE],
         }),
         { status: 200 },
       );
@@ -208,7 +211,7 @@ test("a stale policy is refreshed only after the cached allowlist matches", asyn
 test("a failed policy refresh still fails closed", async () => {
   const dataDir = tmpDataDir();
   saveDevicePolicy(dataDir, 0);
-  const repo = initRepo("git@github.com:acme/widgets.git");
+  const repo = initWidgetsRepo();
 
   const original = globalThis.fetch;
   globalThis.fetch = (async () => {
@@ -226,7 +229,7 @@ test("a failed policy refresh still fails closed", async () => {
 test("a fresh policy is not refetched", async () => {
   const dataDir = tmpDataDir();
   saveDevicePolicy(dataDir, Date.now());
-  const repo = initRepo("git@github.com:acme/widgets.git");
+  const repo = initWidgetsRepo();
 
   let policyCalls = 0;
   const restore = stubFetch({

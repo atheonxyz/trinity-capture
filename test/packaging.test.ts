@@ -104,3 +104,11 @@ test("the repo-root marketplace manifest names trinity-capture at the packaged p
   assert.equal(plugin.version, entry.version, "marketplace entry and plugin.json disagree on the version");
   assert.ok(existsSync(join(sourceDir, "dist", "claude-hook.js")), "the marketplace entry points at a dir without the committed build");
 });
+
+test("the connect command is manual-only and passes one pairing-code argument", () => {
+  const command = readFileSync(join(process.cwd(), "claude-code", "commands", "trinity-connect.md"), "utf8");
+  assert.match(command, /^argument-hint: \[pairing-code\]$/m);
+  assert.match(command, /^disable-model-invocation: true$/m);
+  assert.match(command, /dist\/connect\.js" \$1/);
+  assert.doesNotMatch(command, /\$ARGUMENTS/);
+});

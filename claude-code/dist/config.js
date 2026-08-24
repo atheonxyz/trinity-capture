@@ -23,9 +23,17 @@ function writeJSON(dir, name, value) {
     }
 }
 export function loadConfig(dir) {
-    const cfg = readJSON(join(dir, "config.json"));
+    const path = join(dir, "config.json");
+    const cfg = readJSON(path);
     if (!cfg || !cfg.token || !cfg.ingestUrl || !cfg.deviceId)
         return null;
+    try {
+        chmodSync(dir, 0o700);
+        chmodSync(path, 0o600);
+    }
+    catch {
+        return null;
+    }
     return cfg;
 }
 export function saveConfig(dir, cfg) {

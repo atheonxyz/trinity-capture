@@ -38,8 +38,15 @@ function writeJSON(dir: string, name: string, value: unknown): void {
 }
 
 export function loadConfig(dir: string): DeviceConfig | null {
-  const cfg = readJSON<DeviceConfig>(join(dir, "config.json"));
+  const path = join(dir, "config.json");
+  const cfg = readJSON<DeviceConfig>(path);
   if (!cfg || !cfg.token || !cfg.ingestUrl || !cfg.deviceId) return null;
+  try {
+    chmodSync(dir, 0o700);
+    chmodSync(path, 0o600);
+  } catch {
+    return null;
+  }
   return cfg;
 }
 

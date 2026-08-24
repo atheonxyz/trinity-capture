@@ -11,7 +11,7 @@ export function matchRoute(policy, gitRemote) {
             continue;
         if (!workspace.route.startsWith("project:"))
             return { send: false };
-        return { send: true, canonicalRepo: workspace.canonicalRepo, route: workspace.route };
+        return { send: true, canonicalRepo: workspace.canonicalRepo };
     }
     return { send: false };
 }

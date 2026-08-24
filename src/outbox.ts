@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DeviceConfig } from "./config.js";
+import type { ItemResult } from "./send.js";
 import { BatchRequestError, refreshPolicy, sendBatch } from "./send.js";
 
 export interface CaptureEvent {
@@ -47,22 +48,28 @@ function fileFor(dir: string, ev: CaptureEvent): string {
 }
 
 function isAlreadyQueued(err: unknown): boolean {
-  return typeof err === "object" && err !== null && "code" in err && (err as { code?: unknown }).code === "EEXIST";
+  return err instanceof Error && "code" in err && err.code === "EEXIST";
 }
 
 function recordDrop(dataDir: string, drop: Omit<DropRecord, "at">): void {
+  const path = join(dataDir, "status.json");
+  let drops: DropRecord[] = [];
+
   try {
-    const path = join(dataDir, "status.json");
-    let drops: DropRecord[] = [];
-    try {
-      const parsed = JSON.parse(readFileSync(path, "utf8")) as { drops?: DropRecord[] };
-      if (Array.isArray(parsed.drops)) drops = parsed.drops;
-    } catch {
-      drops = [];
+    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+    if (typeof parsed === "object" && parsed !== null && "drops" in parsed && Array.isArray(parsed.drops)) {
+      drops = parsed.drops;
     }
-    drops.push({ at: new Date().toISOString(), ...drop });
+  } catch (err) {
+    if (!(err instanceof Error)) throw err;
+  }
+
+  drops.push({ at: new Date().toISOString(), ...drop });
+
+  try {
     writeFileSync(path, JSON.stringify({ drops: drops.slice(-MAX_DROP_RECORDS) }, null, 2));
-  } catch {
+  } catch (err) {
+    if (!(err instanceof Error)) throw err;
     return;
   }
 }
@@ -96,13 +103,15 @@ export async function drain(dataDir: string, cfg: DeviceConfig): Promise<void> {
     try {
       mtimeMs = statSync(path).mtimeMs;
       raw = readFileSync(path, "utf8").trim();
-    } catch {
+    } catch (err) {
+      if (!(err instanceof Error)) throw err;
       continue;
     }
     let event: CaptureEvent;
     try {
       event = JSON.parse(raw) as CaptureEvent;
-    } catch {
+    } catch (err) {
+      if (!(err instanceof SyntaxError)) throw err;
       rmSync(path, { force: true });
       continue;
     }
@@ -134,7 +143,8 @@ export async function drain(dataDir: string, cfg: DeviceConfig): Promise<void> {
   if (policyStale) {
     try {
       await refreshPolicy(dataDir, cfg);
-    } catch {
+    } catch (err) {
+      if (!(err instanceof Error)) throw err;
       return;
     }
   }
@@ -143,7 +153,7 @@ export async function drain(dataDir: string, cfg: DeviceConfig): Promise<void> {
 type DeliveryOutcome = { policyStale: boolean } | "abort";
 
 async function deliverBatch(dir: string, dataDir: string, cfg: DeviceConfig, entries: OutboxEntry[]): Promise<DeliveryOutcome> {
-  let results;
+  let results: ItemResult[];
   try {
     results = await sendBatch(cfg, entries.map((e) => e.event));
   } catch (err) {

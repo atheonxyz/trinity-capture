@@ -7,8 +7,8 @@ import { isPolicyFresh, matchRoute, routeFor } from "./gate.js";
 import { appendEvent, drain } from "./outbox.js";
 import { gitRemoteOf, repoRelativeCwd, workspaceObserved } from "./observe.js";
 import { refreshPolicy } from "./send.js";
-const ALLOW_EVERY_EVENT = ["hook_event_name", "session_id", "prompt_id", "permission_mode"];
-const ALLOW_PER_EVENT = {
+const SHARED_PAYLOAD_KEYS = ["hook_event_name", "session_id", "prompt_id", "permission_mode"];
+const EVENT_PAYLOAD_KEYS = {
     SessionStart: ["source"],
     UserPromptSubmit: ["prompt"],
     PostToolUse: ["tool_name", "tool_use_id", "duration_ms"],
@@ -17,7 +17,7 @@ const ALLOW_PER_EVENT = {
 };
 function filterPayload(eventName, raw) {
     const out = {};
-    for (const key of [...ALLOW_EVERY_EVENT, ...(ALLOW_PER_EVENT[eventName] ?? [])]) {
+    for (const key of [...SHARED_PAYLOAD_KEYS, ...(EVENT_PAYLOAD_KEYS[eventName] ?? [])]) {
         if (key in raw)
             out[key] = raw[key];
     }

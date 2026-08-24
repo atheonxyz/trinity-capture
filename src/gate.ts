@@ -1,6 +1,6 @@
 import type { Policy } from "./config.js";
 
-export type CaptureRoute = { send: false } | { send: true; canonicalRepo: string; route: string };
+type CaptureRoute = { send: false } | { send: true; canonicalRepo: string };
 
 export function isPolicyFresh(policy: Policy | null, now: number): policy is Policy {
   return policy !== null && now <= policy.fetchedAt + policy.ttlSeconds * 1000;
@@ -14,7 +14,7 @@ export function matchRoute(policy: Policy | null, gitRemote: string | null): Cap
     const candidates = [workspace.canonicalRepo, ...workspace.aliases].map(normalizeRemote);
     if (!candidates.includes(normalized)) continue;
     if (!workspace.route.startsWith("project:")) return { send: false };
-    return { send: true, canonicalRepo: workspace.canonicalRepo, route: workspace.route };
+    return { send: true, canonicalRepo: workspace.canonicalRepo };
   }
   return { send: false };
 }

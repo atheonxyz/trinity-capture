@@ -8,6 +8,8 @@ import type { CaptureEvent, DropRecord } from "../src/outbox.js";
 import type { DeviceConfig } from "../src/config.js";
 import type { ItemResult } from "../src/send.js";
 
+type BatchBody = { readonly items: CaptureEvent[] };
+
 function tmpDataDir(): string {
   return mkdtempSync(join(tmpdir(), "trinity-outbox-"));
 }
@@ -32,15 +34,30 @@ function readDrops(dataDir: string): DropRecord[] {
 
 const cfg: DeviceConfig = { token: "tok", ingestUrl: "https://ingest.example/api/v1/ingest/batches", deviceId: "d1" };
 
-function stubFetch(handler: (body: { items: CaptureEvent[] }) => ItemResult[]): () => void {
+function batchBody(init?: RequestInit): BatchBody {
+  return JSON.parse(String(init?.body)) as BatchBody;
+}
+
+function storedResults(items: readonly CaptureEvent[]): ItemResult[] {
+  return items.map((item) => ({ captureEventId: item.captureEventId, outcome: "stored" }));
+}
+
+async function drainWithFetch(dataDir: string, fetchImpl: typeof fetch): Promise<void> {
   const original = globalThis.fetch;
-  globalThis.fetch = (async (_url: string, init?: RequestInit) => {
-    const body = JSON.parse(String(init?.body)) as { items: CaptureEvent[] };
-    return new Response(JSON.stringify({ results: handler(body) }), { status: 200 });
-  }) as typeof fetch;
-  return () => {
+  globalThis.fetch = fetchImpl;
+  try {
+    await drain(dataDir, cfg);
+  } finally {
     globalThis.fetch = original;
-  };
+  }
+}
+
+async function drainWithStubFetch(dataDir: string, handler: (body: BatchBody) => ItemResult[]): Promise<void> {
+  await drainWithFetch(
+    dataDir,
+    async (_url: string | Request | URL, init?: RequestInit) =>
+      new Response(JSON.stringify({ results: handler(batchBody(init)) }), { status: 200 }),
+  );
 }
 
 test("appendEvent writes a file that round-trips", () => {
@@ -70,17 +87,14 @@ test("drain deletes acknowledged events and keeps retry_later ones", async () =>
   appendEvent(dataDir, e1);
   appendEvent(dataDir, e2);
 
-  const restore = stubFetch((body) =>
-    body.items.map((item) => ({
-      captureEventId: item.captureEventId,
-      outcome: item.captureEventId === e1.captureEventId ? "stored" : "retry_later",
-    })),
+  await drainWithStubFetch(
+    dataDir,
+    (body) =>
+      body.items.map((item) => ({
+        captureEventId: item.captureEventId,
+        outcome: item.captureEventId === e1.captureEventId ? "stored" : "retry_later",
+      })),
   );
-  try {
-    await drain(dataDir, cfg);
-  } finally {
-    restore();
-  }
 
   const remaining = readdirSync(join(dataDir, "outbox"));
   assert.equal(remaining.length, 1);
@@ -92,15 +106,12 @@ test("drain retains the whole outbox on a request-level failure", async () => {
   appendEvent(dataDir, makeEvent("33333333-3333-3333-3333-333333333333"));
   appendEvent(dataDir, makeEvent("44444444-4444-4444-4444-444444444444"));
 
-  const original = globalThis.fetch;
-  globalThis.fetch = (async () => {
-    throw new Error("network down");
-  }) as typeof fetch;
-  try {
-    await drain(dataDir, cfg);
-  } finally {
-    globalThis.fetch = original;
-  }
+  await drainWithFetch(
+    dataDir,
+    async () => {
+      throw new Error("network down");
+    },
+  );
 
   assert.equal(readdirSync(join(dataDir, "outbox")).length, 2);
 });
@@ -112,15 +123,13 @@ test("drain caps each request at 100 events", async () => {
   }
 
   const batchSizes: number[] = [];
-  const restore = stubFetch((body) => {
-    batchSizes.push(body.items.length);
-    return body.items.map((item) => ({ captureEventId: item.captureEventId, outcome: "stored" }));
-  });
-  try {
-    await drain(dataDir, cfg);
-  } finally {
-    restore();
-  }
+  await drainWithStubFetch(
+    dataDir,
+    (body) => {
+      batchSizes.push(body.items.length);
+      return storedResults(body.items);
+    },
+  );
 
   assert.deepEqual(batchSizes, [100, 1]);
   assert.equal(readdirSync(join(dataDir, "outbox")).length, 0);
@@ -134,15 +143,13 @@ test("drain sends at most 5 batches per call", async () => {
   }
 
   let calls = 0;
-  const restore = stubFetch((body) => {
-    calls++;
-    return body.items.map((item) => ({ captureEventId: item.captureEventId, outcome: "stored" }));
-  });
-  try {
-    await drain(dataDir, cfg);
-  } finally {
-    restore();
-  }
+  await drainWithStubFetch(
+    dataDir,
+    (body) => {
+      calls++;
+      return storedResults(body.items);
+    },
+  );
 
   assert.equal(calls, 5);
   assert.equal(readdirSync(join(dataDir, "outbox")).length, 50);
@@ -170,15 +177,13 @@ test("drain assembles batches under the byte budget, not just the count cap", as
   }
 
   const batchSizes: number[] = [];
-  const restore = stubFetch((body) => {
-    batchSizes.push(body.items.length);
-    return body.items.map((item) => ({ captureEventId: item.captureEventId, outcome: "stored" }));
-  });
-  try {
-    await drain(dataDir, cfg);
-  } finally {
-    restore();
-  }
+  await drainWithStubFetch(
+    dataDir,
+    (body) => {
+      batchSizes.push(body.items.length);
+      return storedResults(body.items);
+    },
+  );
 
   assert.deepEqual(batchSizes, [15, 1]);
   assert.equal(readdirSync(join(dataDir, "outbox")).length, 0);
@@ -192,23 +197,17 @@ test("a 413 batch is bisected until the poisoned event stands alone and is dropp
   }
 
   const batchSizes: number[] = [];
-  const original = globalThis.fetch;
-  globalThis.fetch = (async (_url: string | URL, init?: RequestInit) => {
-    const body = JSON.parse(String(init?.body)) as { items: CaptureEvent[] };
-    batchSizes.push(body.items.length);
-    if (body.items.some((item) => item.captureEventId === poisonId)) {
-      return new Response("batch body too large", { status: 413 });
-    }
-    return new Response(
-      JSON.stringify({ results: body.items.map((item) => ({ captureEventId: item.captureEventId, outcome: "stored" })) }),
-      { status: 200 },
-    );
-  }) as typeof fetch;
-  try {
-    await drain(dataDir, cfg);
-  } finally {
-    globalThis.fetch = original;
-  }
+  await drainWithFetch(
+    dataDir,
+    async (_url: string | Request | URL, init?: RequestInit) => {
+      const body = batchBody(init);
+      batchSizes.push(body.items.length);
+      if (body.items.some((item) => item.captureEventId === poisonId)) {
+        return new Response("batch body too large", { status: 413 });
+      }
+      return new Response(JSON.stringify({ results: storedResults(body.items) }), { status: 200 });
+    },
+  );
 
   assert.equal(readdirSync(join(dataDir, "outbox")).length, 0);
   const drops = readDrops(dataDir);
@@ -224,28 +223,28 @@ test("a policy_stale outcome triggers exactly one policy refresh after the drain
   appendEvent(dataDir, makeEvent("77777777-7777-7777-7777-777777777777"));
 
   let policyCalls = 0;
-  const original = globalThis.fetch;
-  globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
-    if (String(url).endsWith("/policy")) {
-      policyCalls++;
+  await drainWithFetch(
+    dataDir,
+    async (url: string | Request | URL, init?: RequestInit) => {
+      if (String(url).endsWith("/policy")) {
+        policyCalls++;
+        return new Response(
+          JSON.stringify({ etag: "fresh", ttlSeconds: 900, captureLevel: "metadata", workspaces: [] }),
+          { status: 200 },
+        );
+      }
       return new Response(
-        JSON.stringify({ etag: "fresh", ttlSeconds: 900, captureLevel: "metadata", workspaces: [] }),
+        JSON.stringify({
+          results: batchBody(init).items.map((item) => ({
+            captureEventId: item.captureEventId,
+            outcome: "retry_later",
+            code: "policy_stale",
+          })),
+        }),
         { status: 200 },
       );
-    }
-    const body = JSON.parse(String(init?.body)) as { items: CaptureEvent[] };
-    return new Response(
-      JSON.stringify({
-        results: body.items.map((item) => ({ captureEventId: item.captureEventId, outcome: "retry_later", code: "policy_stale" })),
-      }),
-      { status: 200 },
-    );
-  }) as typeof fetch;
-  try {
-    await drain(dataDir, cfg);
-  } finally {
-    globalThis.fetch = original;
-  }
+    },
+  );
 
   assert.equal(policyCalls, 1, "one refresh, not one per stale item");
   assert.equal(readdirSync(join(dataDir, "outbox")).length, 2, "stale items stay queued for the next drain");
@@ -263,15 +262,13 @@ test("drain drops events older than the retry window without sending them", asyn
   utimesSync(join(dataDir, "outbox", staleFile), eightDaysAgo, eightDaysAgo);
 
   const sentIds: string[] = [];
-  const restore = stubFetch((body) => {
-    sentIds.push(...body.items.map((i) => i.captureEventId));
-    return body.items.map((item) => ({ captureEventId: item.captureEventId, outcome: "stored" }));
-  });
-  try {
-    await drain(dataDir, cfg);
-  } finally {
-    restore();
-  }
+  await drainWithStubFetch(
+    dataDir,
+    (body) => {
+      sentIds.push(...body.items.map((i) => i.captureEventId));
+      return storedResults(body.items);
+    },
+  );
 
   assert.deepEqual(sentIds, [fresh.captureEventId], "the expired event must never be sent");
   assert.equal(readdirSync(join(dataDir, "outbox")).length, 0);

@@ -17,24 +17,28 @@ function fileFor(dir, ev) {
     return join(dir, `${stamp}-${ev.captureEventId}.jsonl`);
 }
 function isAlreadyQueued(err) {
-    return typeof err === "object" && err !== null && "code" in err && err.code === "EEXIST";
+    return err instanceof Error && "code" in err && err.code === "EEXIST";
 }
 function recordDrop(dataDir, drop) {
+    const path = join(dataDir, "status.json");
+    let drops = [];
     try {
-        const path = join(dataDir, "status.json");
-        let drops = [];
-        try {
-            const parsed = JSON.parse(readFileSync(path, "utf8"));
-            if (Array.isArray(parsed.drops))
-                drops = parsed.drops;
+        const parsed = JSON.parse(readFileSync(path, "utf8"));
+        if (typeof parsed === "object" && parsed !== null && "drops" in parsed && Array.isArray(parsed.drops)) {
+            drops = parsed.drops;
         }
-        catch {
-            drops = [];
-        }
-        drops.push({ at: new Date().toISOString(), ...drop });
+    }
+    catch (err) {
+        if (!(err instanceof Error))
+            throw err;
+    }
+    drops.push({ at: new Date().toISOString(), ...drop });
+    try {
         writeFileSync(path, JSON.stringify({ drops: drops.slice(-MAX_DROP_RECORDS) }, null, 2));
     }
-    catch {
+    catch (err) {
+        if (!(err instanceof Error))
+            throw err;
         return;
     }
 }
@@ -68,14 +72,18 @@ export async function drain(dataDir, cfg) {
             mtimeMs = statSync(path).mtimeMs;
             raw = readFileSync(path, "utf8").trim();
         }
-        catch {
+        catch (err) {
+            if (!(err instanceof Error))
+                throw err;
             continue;
         }
         let event;
         try {
             event = JSON.parse(raw);
         }
-        catch {
+        catch (err) {
+            if (!(err instanceof SyntaxError))
+                throw err;
             rmSync(path, { force: true });
             continue;
         }
@@ -109,7 +117,9 @@ export async function drain(dataDir, cfg) {
         try {
             await refreshPolicy(dataDir, cfg);
         }
-        catch {
+        catch (err) {
+            if (!(err instanceof Error))
+                throw err;
             return;
         }
     }

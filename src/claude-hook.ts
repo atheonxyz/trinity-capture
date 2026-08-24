@@ -8,14 +8,14 @@ import { appendEvent, drain } from "./outbox.js";
 import { gitRemoteOf, repoRelativeCwd, workspaceObserved } from "./observe.js";
 import { refreshPolicy } from "./send.js";
 
-interface HookInput {
-  session_id?: string;
-  cwd?: string;
-  [key: string]: unknown;
-}
+type HookInput = {
+  readonly session_id?: string;
+  readonly cwd?: string;
+  readonly [key: string]: unknown;
+};
 
-const ALLOW_EVERY_EVENT = ["hook_event_name", "session_id", "prompt_id", "permission_mode"] as const;
-const ALLOW_PER_EVENT: Record<string, readonly string[]> = {
+const SHARED_PAYLOAD_KEYS = ["hook_event_name", "session_id", "prompt_id", "permission_mode"] as const;
+const EVENT_PAYLOAD_KEYS: Record<string, readonly string[]> = {
   SessionStart: ["source"],
   UserPromptSubmit: ["prompt"],
   PostToolUse: ["tool_name", "tool_use_id", "duration_ms"],
@@ -25,7 +25,7 @@ const ALLOW_PER_EVENT: Record<string, readonly string[]> = {
 
 function filterPayload(eventName: string, raw: HookInput): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const key of [...ALLOW_EVERY_EVENT, ...(ALLOW_PER_EVENT[eventName] ?? [])]) {
+  for (const key of [...SHARED_PAYLOAD_KEYS, ...(EVENT_PAYLOAD_KEYS[eventName] ?? [])]) {
     if (key in raw) out[key] = raw[key];
   }
   return out;
