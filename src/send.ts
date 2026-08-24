@@ -1,7 +1,8 @@
-// Wire contract (spec §5): POST /ingest/batches, GET /ingest/policy.
 import type { CaptureEvent } from "./outbox.js";
 import type { DeviceConfig, Policy } from "./config.js";
 import { loadPolicy, savePolicy } from "./config.js";
+
+export const REQUEST_TIMEOUT_MS = 10_000;
 
 export interface ItemResult {
   captureEventId: string;
@@ -9,17 +10,12 @@ export interface ItemResult {
   code?: string;
 }
 
-// BatchRequestError carries the HTTP status so the outbox can tell a
-// poisoned batch (413, worth bisecting) from a failure that retains the
-// whole outbox.
 export class BatchRequestError extends Error {
   constructor(readonly status: number) {
     super(`ingest batch failed: ${status}`);
   }
 }
 
-// Throws on request-level failure (network error or non-2xx) so the caller
-// can retain the whole outbox rather than mis-acking individual items.
 export async function sendBatch(cfg: DeviceConfig, events: CaptureEvent[]): Promise<ItemResult[]> {
   const res = await fetch(cfg.ingestUrl, {
     method: "POST",
@@ -29,21 +25,20 @@ export async function sendBatch(cfg: DeviceConfig, events: CaptureEvent[]): Prom
       "X-Trinity-Wire-Version": "1",
     },
     body: JSON.stringify({ items: events }),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!res.ok) throw new BatchRequestError(res.status);
   const body = (await res.json()) as { results: ItemResult[] };
   return body.results;
 }
 
-// Best-effort ETag sync; returns the caller's existing policy (possibly
-// null) on any non-2xx/304 response rather than throwing.
 export async function refreshPolicy(dataDir: string, cfg: DeviceConfig): Promise<Policy | null> {
   const current = loadPolicy(dataDir);
   const policyUrl = cfg.ingestUrl.replace(/\/batches$/, "/policy");
   const headers: Record<string, string> = { Authorization: `Bearer ${cfg.token}` };
   if (current) headers["If-None-Match"] = current.etag;
 
-  const res = await fetch(policyUrl, { headers });
+  const res = await fetch(policyUrl, { headers, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
   if (res.status === 304 && current) {
     const refreshed: Policy = { ...current, fetchedAt: Date.now() };
     savePolicy(dataDir, refreshed);

@@ -6,7 +6,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runHook } from "../src/claude-hook.js";
 import { saveConfig, savePolicy } from "../src/config.js";
-import type { DeviceConfig, Policy } from "../src/config.js";
 
 function tmpDataDir(): string {
   return mkdtempSync(join(tmpdir(), "trinity-data-"));
@@ -35,9 +34,17 @@ function outboxFiles(dataDir: string): string[] {
   return existsSync(dir) ? readdirSync(dir) : [];
 }
 
-// Distinguishes the policy GET from the batches POST so a single stub can
-// answer both calls a SessionStart invocation may make. onBatch defaults to
-// retry_later so appended events are left in the outbox for inspection.
+function saveDevicePolicy(dataDir: string, fetchedAt: number): void {
+  saveConfig(dataDir, { token: "tok", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev1" });
+  savePolicy(dataDir, {
+    etag: fetchedAt === 0 ? "old" : "e1",
+    fetchedAt,
+    ttlSeconds: 900,
+    captureLevel: "metadata",
+    workspaces: [{ canonicalRepo: "github.com/acme/widgets", aliases: [], route: "project:p1" }],
+  });
+}
+
 function stubFetch(opts: {
   onPolicy?: () => Response;
   onBatch?: (items: { captureEventId: string }[]) => Response;
@@ -73,19 +80,7 @@ const sessionStartInput = {
 
 test("SessionStart in an allowlisted repo appends the session event and workspace.observed", async () => {
   const dataDir = tmpDataDir();
-  // Unreachable on purpose (TEST-NET port 0): drain must fail fast and
-  // leave the outbox intact, so the assertion below is about appendEvent,
-  // not about a real batch round-trip.
-  const cfg: DeviceConfig = { token: "tok", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev1" };
-  saveConfig(dataDir, cfg);
-  const policy: Policy = {
-    etag: "e1",
-    fetchedAt: Date.now(),
-    ttlSeconds: 900,
-    captureLevel: "metadata",
-    workspaces: [{ canonicalRepo: "github.com/acme/widgets", aliases: [], route: "project:p1" }],
-  };
-  savePolicy(dataDir, policy);
+  saveDevicePolicy(dataDir, Date.now());
 
   const repo = initRepo("git@github.com:acme/widgets.git");
 
@@ -105,20 +100,9 @@ test("the same fixture with no config file appends nothing and never throws", as
 
 test("PostToolUse forwards only allowlisted metadata — no tool bodies under any name, no local paths", async () => {
   const dataDir = tmpDataDir();
-  const cfg: DeviceConfig = { token: "tok", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev1" };
-  saveConfig(dataDir, cfg);
-  savePolicy(dataDir, {
-    etag: "e1",
-    fetchedAt: Date.now(),
-    ttlSeconds: 900,
-    captureLevel: "metadata",
-    workspaces: [{ canonicalRepo: "github.com/acme/widgets", aliases: [], route: "project:p1" }],
-  });
+  saveDevicePolicy(dataDir, Date.now());
   const repo = initRepo("git@github.com:acme/widgets.git");
 
-  // The real captured PostToolUse shape (claude 2.1.241: tool_response, not
-  // tool_output) plus a field the vendor has never sent — the allowlist must
-  // drop what it has not heard of, not just what it can name.
   await runHook(
     "PostToolUse",
     {
@@ -158,15 +142,7 @@ test("PostToolUse forwards only allowlisted metadata — no tool bodies under an
 
 test("UserPromptSubmit mints a turnKey the following events carry until the next prompt", async () => {
   const dataDir = tmpDataDir();
-  const cfg: DeviceConfig = { token: "tok", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev1" };
-  saveConfig(dataDir, cfg);
-  savePolicy(dataDir, {
-    etag: "e1",
-    fetchedAt: Date.now(),
-    ttlSeconds: 900,
-    captureLevel: "metadata",
-    workspaces: [{ canonicalRepo: "github.com/acme/widgets", aliases: [], route: "project:p1" }],
-  });
+  saveDevicePolicy(dataDir, Date.now());
   const repo = initRepo("git@github.com:acme/widgets.git");
 
   interface OutboxEvent {
@@ -199,14 +175,9 @@ test("UserPromptSubmit mints a turnKey the following events carry until the next
   assert.equal(byKind("SessionEnd")[0].turnKey, prompt2.turnKey, "SessionEnd still carries the latest prompt's key");
 });
 
-test("a stale policy is refreshed before the gate, and the refresh is what this invocation gates on", async () => {
+test("a stale policy is refreshed only after the cached allowlist matches", async () => {
   const dataDir = tmpDataDir();
-  const cfg: DeviceConfig = { token: "tok", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev1" };
-  saveConfig(dataDir, cfg);
-  // Stale AND missing this repo entirely — simulating a project selecting
-  // the repo only after this device's cached policy went stale. Only a
-  // refresh performed before the gate can let this SessionStart through.
-  savePolicy(dataDir, { etag: "old", fetchedAt: 0, ttlSeconds: 900, captureLevel: "metadata", workspaces: [] });
+  saveDevicePolicy(dataDir, 0);
   const repo = initRepo("git@github.com:acme/widgets.git");
 
   let policyCalls = 0;
@@ -236,15 +207,7 @@ test("a stale policy is refreshed before the gate, and the refresh is what this 
 
 test("a failed policy refresh still fails closed", async () => {
   const dataDir = tmpDataDir();
-  const cfg: DeviceConfig = { token: "tok", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev1" };
-  saveConfig(dataDir, cfg);
-  savePolicy(dataDir, {
-    etag: "old",
-    fetchedAt: 0,
-    ttlSeconds: 900,
-    captureLevel: "metadata",
-    workspaces: [{ canonicalRepo: "github.com/acme/widgets", aliases: [], route: "project:p1" }],
-  });
+  saveDevicePolicy(dataDir, 0);
   const repo = initRepo("git@github.com:acme/widgets.git");
 
   const original = globalThis.fetch;
@@ -262,15 +225,7 @@ test("a failed policy refresh still fails closed", async () => {
 
 test("a fresh policy is not refetched", async () => {
   const dataDir = tmpDataDir();
-  const cfg: DeviceConfig = { token: "tok", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev1" };
-  saveConfig(dataDir, cfg);
-  savePolicy(dataDir, {
-    etag: "e1",
-    fetchedAt: Date.now(),
-    ttlSeconds: 900,
-    captureLevel: "metadata",
-    workspaces: [{ canonicalRepo: "github.com/acme/widgets", aliases: [], route: "project:p1" }],
-  });
+  saveDevicePolicy(dataDir, Date.now());
   const repo = initRepo("git@github.com:acme/widgets.git");
 
   let policyCalls = 0;

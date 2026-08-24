@@ -14,9 +14,9 @@ plugin per coding product. Claude Code ships in Phase 1; Codex and Cursor are de
    Trinity dashboard's IDE integrations page (e.g. `/trinity-connect ABCD1234EFGH`).
    This exchanges the code for a device token and writes it to the plugin's own data
    directory — never into the repo, never into shell history.
-3. That's it. The plugin captures sessions automatically for every repository one of
-   your projects has selected. Unmatched repositories never send session events; when
-   the local policy is expired, the plugin may refresh that policy before matching.
+3. That's it. The plugin captures sessions automatically for every repository in its
+   local allowlist. Unmatched repositories make no requests. Run `/trinity-connect`
+   again without a code to refresh policy for newly selected repositories.
 
 `TRINITY_BASE_URL` overrides the dashboard origin `/trinity-connect` exchanges the
 pairing code against, for pointing a local build at a non-production backend.
@@ -83,10 +83,10 @@ designed extension, not implemented yet.
   makes zero network requests, for any hook, ever.
 - **No policy, no send.** A missing or expired (15-minute TTL) capture-policy document
   fails every gate check closed — not just for a specific repo, for everything.
-- **Unmatched repo, no session send.** A git remote that doesn't normalize to an
-  allowlisted `canonicalRepo` or one of its aliases never queues or sends a session
-  event. An expired policy can still trigger an authenticated policy refresh before
-  this local match.
+- **Unmatched repo, no request.** A git remote that doesn't normalize to an allowlisted
+  `canonicalRepo` or one of its aliases never queues a session event or contacts
+  Trinity from that hook. `/trinity-connect` without a code refreshes policy for an
+  already-paired device.
 - **Absolute paths never leave the machine.** The raw hook payload's `cwd` and
   `transcript_path` are always stripped before send; only the repo-relative cwd travels.
 - **The outbox survives failure.** Every event is written to disk before any network

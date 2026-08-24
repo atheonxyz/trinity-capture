@@ -54,6 +54,15 @@ test("appendEvent writes a file that round-trips", () => {
   assert.deepEqual(JSON.parse(content.trim()), ev);
 });
 
+test("appendEvent treats the same capture event as already queued", () => {
+  const dataDir = tmpDataDir();
+  const ev = makeEvent("12121212-1212-1212-1212-121212121212");
+  appendEvent(dataDir, ev);
+  appendEvent(dataDir, ev);
+
+  assert.equal(readdirSync(join(dataDir, "outbox")).length, 1);
+});
+
 test("drain deletes acknowledged events and keeps retry_later ones", async () => {
   const dataDir = tmpDataDir();
   const e1 = makeEvent("11111111-1111-1111-1111-111111111111");
@@ -154,8 +163,6 @@ test("appendEvent drops an event over the per-event cap and records the drop", (
 
 test("drain assembles batches under the byte budget, not just the count cap", async () => {
   const dataDir = tmpDataDir();
-  // 200 KiB events: under the per-event cap, but sixteen of them blow the
-  // ~3 MiB batch budget at fifteen — far below the count cap's 100.
   for (let i = 0; i < 16; i++) {
     const ev = makeEvent(`${String(i).padStart(8, "0")}-2222-0000-0000-000000000000`, new Date(i).toISOString());
     ev.payload = { prompt: "x".repeat(200 * 1024) };
@@ -203,7 +210,6 @@ test("a 413 batch is bisected until the poisoned event stands alone and is dropp
     globalThis.fetch = original;
   }
 
-  // [0..3] 413 → [0,1] ok → [2,3] 413 → [2=poison] 413 alone → dropped → [3] ok.
   assert.equal(readdirSync(join(dataDir, "outbox")).length, 0);
   const drops = readDrops(dataDir);
   assert.equal(drops.length, 1);

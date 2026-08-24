@@ -1,11 +1,4 @@
-// JSONL outbox: one file per pending event under <dataDir>/outbox/, written
-// before any network I/O; deleted only once its outcome is terminal
-// (stored/duplicate/rejected_permanent) or the event is unsendable — over
-// the per-event size cap at append, poisoning a batch with 413, or older
-// than the retry window. Every such drop is recorded in <dataDir>/status.json
-// rather than vanishing. drain() groups files into size-aware batches at
-// send time (spec §4.5/§5).
-import { mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DeviceConfig } from "./config.js";
 import { BatchRequestError, refreshPolicy, sendBatch } from "./send.js";
@@ -31,13 +24,8 @@ export interface DropRecord {
 
 const MAX_BATCHES = 5;
 const MAX_EVENTS_PER_BATCH = 100;
-// One event over 256 KiB serialized can never be accepted (the server's
-// per-item cap), so it is dropped at append rather than wedging the outbox.
 const MAX_EVENT_BYTES = 256 * 1024;
-// Keeps every assembled batch body comfortably under the server's 4 MiB
-// request cap, so a 413 means a genuinely poisoned batch, not routine load.
 const MAX_BATCH_BYTES = 3 * 1024 * 1024;
-// An event retry_later has kept alive this long is never going to land.
 const MAX_RETRY_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_DROP_RECORDS = 100;
 
@@ -58,8 +46,10 @@ function fileFor(dir: string, ev: CaptureEvent): string {
   return join(dir, `${stamp}-${ev.captureEventId}.jsonl`);
 }
 
-// recordDrop appends one entry to status.json, capped to the most recent
-// MAX_DROP_RECORDS. Best-effort: recording a drop must never fail the hook.
+function isAlreadyQueued(err: unknown): boolean {
+  return typeof err === "object" && err !== null && "code" in err && (err as { code?: unknown }).code === "EEXIST";
+}
+
 function recordDrop(dataDir: string, drop: Omit<DropRecord, "at">): void {
   try {
     const path = join(dataDir, "status.json");
@@ -68,12 +58,12 @@ function recordDrop(dataDir: string, drop: Omit<DropRecord, "at">): void {
       const parsed = JSON.parse(readFileSync(path, "utf8")) as { drops?: DropRecord[] };
       if (Array.isArray(parsed.drops)) drops = parsed.drops;
     } catch {
-      // missing or corrupt status file — start fresh
+      drops = [];
     }
     drops.push({ at: new Date().toISOString(), ...drop });
     writeFileSync(path, JSON.stringify({ drops: drops.slice(-MAX_DROP_RECORDS) }, null, 2));
   } catch {
-    // status is best-effort; the drop already is the failure path
+    return;
   }
 }
 
@@ -84,7 +74,12 @@ export function appendEvent(dataDir: string, ev: CaptureEvent): void {
     return;
   }
   const dir = outboxDir(dataDir);
-  writeFileSync(fileFor(dir, ev), line, { flag: "wx" });
+  try {
+    writeFileSync(fileFor(dir, ev), line, { flag: "wx" });
+  } catch (err) {
+    if (isAlreadyQueued(err)) return;
+    throw err;
+  }
 }
 
 export async function drain(dataDir: string, cfg: DeviceConfig): Promise<void> {
@@ -102,17 +97,17 @@ export async function drain(dataDir: string, cfg: DeviceConfig): Promise<void> {
       mtimeMs = statSync(path).mtimeMs;
       raw = readFileSync(path, "utf8").trim();
     } catch {
-      continue; // a sibling drain already consumed it
+      continue;
     }
     let event: CaptureEvent;
     try {
       event = JSON.parse(raw) as CaptureEvent;
     } catch {
-      unlinkSync(path); // corrupt entry — cannot be retried meaningfully
+      rmSync(path, { force: true });
       continue;
     }
     if (Date.now() - mtimeMs > MAX_RETRY_AGE_MS) {
-      unlinkSync(path);
+      rmSync(path, { force: true });
       recordDrop(dataDir, { reason: "expired", captureEventId: event.captureEventId, kind: event.kind });
       continue;
     }
@@ -132,29 +127,21 @@ export async function drain(dataDir: string, cfg: DeviceConfig): Promise<void> {
       offset++;
     }
     const outcome = await deliverBatch(dir, dataDir, cfg, slice);
-    if (outcome === "abort") break; // request-level failure — retain the rest
+    if (outcome === "abort") break;
     if (outcome.policyStale) policyStale = true;
   }
 
-  // A policy_stale outcome means the server knows a repo this device's
-  // cached policy does not: refresh once now so the next drain retries the
-  // kept events against a current document instead of looping stale.
   if (policyStale) {
     try {
       await refreshPolicy(dataDir, cfg);
     } catch {
-      // best-effort; the kept events simply wait for the next refresh
+      return;
     }
   }
 }
 
 type DeliveryOutcome = { policyStale: boolean } | "abort";
 
-// deliverBatch sends one batch and settles its files. A 413 means the batch
-// as a whole is unacceptable even though every event passed the append-time
-// cap: bisect it until the poisoned event stands alone, drop that one as
-// recorded, and let everything else land. Any other request-level failure
-// (network/401/403/429/5xx) aborts the drain and retains the outbox.
 async function deliverBatch(dir: string, dataDir: string, cfg: DeviceConfig, entries: OutboxEntry[]): Promise<DeliveryOutcome> {
   let results;
   try {
@@ -162,7 +149,7 @@ async function deliverBatch(dir: string, dataDir: string, cfg: DeviceConfig, ent
   } catch (err) {
     if (err instanceof BatchRequestError && err.status === 413) {
       if (entries.length === 1) {
-        unlinkSync(join(dir, entries[0].file));
+        rmSync(join(dir, entries[0].file), { force: true });
         recordDrop(dataDir, { reason: "poison", captureEventId: entries[0].event.captureEventId, kind: entries[0].event.kind });
         return { policyStale: false };
       }
@@ -180,9 +167,9 @@ async function deliverBatch(dir: string, dataDir: string, cfg: DeviceConfig, ent
   let policyStale = false;
   for (const { file, event } of entries) {
     const result = resultById.get(event.captureEventId);
-    if (result === undefined) continue; // missing from the response: kept for the next drain
+    if (result === undefined) continue;
     if (result.outcome === "stored" || result.outcome === "duplicate" || result.outcome === "rejected_permanent") {
-      unlinkSync(join(dir, file));
+      rmSync(join(dir, file), { force: true });
     } else if (result.outcome === "retry_later" && result.code === "policy_stale") {
       policyStale = true;
     }

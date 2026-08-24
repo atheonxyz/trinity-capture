@@ -1,6 +1,5 @@
-// Credentials + policy cache live in the product's plugin-data dir
-// (CLAUDE_PLUGIN_DATA), never in the repo.
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export interface DeviceConfig {
@@ -26,8 +25,16 @@ function readJSON<T>(path: string): T | null {
 }
 
 function writeJSON(dir: string, name: string, value: unknown): void {
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, name), JSON.stringify(value, null, 2));
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  chmodSync(dir, 0o700);
+  const path = join(dir, name);
+  const temporary = join(dir, `.${name}.${process.pid}.${randomUUID()}.tmp`);
+  try {
+    writeFileSync(temporary, JSON.stringify(value, null, 2), { encoding: "utf8", flag: "wx", mode: 0o600 });
+    renameSync(temporary, path);
+  } finally {
+    rmSync(temporary, { force: true });
+  }
 }
 
 export function loadConfig(dir: string): DeviceConfig | null {
