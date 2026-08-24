@@ -47,6 +47,24 @@ test("the committed hook and connect binaries exist where hooks.json / the READM
   assert.ok(existsSync(connectBin), `${connectBin} is missing — run pnpm build:plugin-cursor and commit the output`);
 });
 
+// Regression guard for a real bug: tsconfig.plugin-cursor.json and
+// tsconfig.plugin.json once both used a whole-tree "src/**/*.ts" include,
+// so building either product's dist pulled in every product's entrypoint —
+// cursor/dist shipped claude-hook.js, claude-code/dist shipped
+// cursor-hook.js/cursor-connect.js. Each tsconfig now lists its own
+// product's entrypoint explicitly; connect.js legitimately stays in
+// cursor/dist because cursor-connect.ts genuinely imports its exchange().
+test("cursor/dist never ships another product's entrypoint", () => {
+  const files = readdirSync(join(pluginRoot, "dist"));
+  assert.ok(!files.includes("claude-hook.js"), "cursor/dist must not ship claude-hook.js — it is not a real dependency of any cursor source file");
+});
+
+test("claude-code/dist never ships the cursor entrypoints", () => {
+  const files = readdirSync(join(process.cwd(), "claude-code", "dist"));
+  assert.ok(!files.includes("cursor-hook.js"), "claude-code/dist must not ship cursor-hook.js");
+  assert.ok(!files.includes("cursor-connect.js"), "claude-code/dist must not ship cursor-connect.js");
+});
+
 test("committed binary, unauthorized device: exits 0 and writes nothing", () => {
   const dataDir = mkdtempSync(join(tmpdir(), "trinity-cursor-pkg-data-"));
   const stdin = JSON.stringify({ hook_event_name: "sessionStart", conversation_id: "s1", generation_id: "g1", model: "default", workspace_roots: ["/workspace/acme"] });
