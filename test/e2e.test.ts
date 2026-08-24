@@ -1,0 +1,131 @@
+// e2e smoke: pairs a device against a real running backend and replays a
+// session through the actual plugin client code (connect.ts's exchange,
+// send.ts's refreshPolicy/sendBatch, outbox.ts's appendEvent/drain) — never
+// a bare fetch standing in for the client.
+//
+// Skipped unless TRINITY_E2E_URL is set. Also requires (the backend has no
+// OAuth-free login, so these come from a one-off seed step — see
+// capture/README.md "e2e smoke" for the exact commands):
+//   TRINITY_E2E_SESSION_TOKEN  a live person session's bearer token
+//   TRINITY_E2E_PROJECT_ID     the project that selected the fixture's repo
+//   TRINITY_E2E_USER_ID        that session's user id
+//   TRINITY_E2E_POSTGRES_URL   read-only: confirms tool_calls carries no bodies
+import test from "node:test";
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+
+import { exchange } from "../src/connect.js";
+import { saveConfig } from "../src/config.js";
+import type { DeviceConfig } from "../src/config.js";
+import { refreshPolicy } from "../src/send.js";
+import { appendEvent, drain } from "../src/outbox.js";
+import type { CaptureEvent } from "../src/outbox.js";
+
+const e2eURL = process.env.TRINITY_E2E_URL;
+const sessionToken = process.env.TRINITY_E2E_SESSION_TOKEN;
+const projectId = process.env.TRINITY_E2E_PROJECT_ID;
+const userId = process.env.TRINITY_E2E_USER_ID;
+const postgresURL = process.env.TRINITY_E2E_POSTGRES_URL;
+
+const ready = Boolean(e2eURL && sessionToken && projectId && userId && postgresURL);
+const skip = ready
+  ? false
+  : "set TRINITY_E2E_URL, TRINITY_E2E_SESSION_TOKEN, TRINITY_E2E_PROJECT_ID, TRINITY_E2E_USER_ID, TRINITY_E2E_POSTGRES_URL to run (see capture/README.md)";
+
+interface Fixture {
+  captureEventId: string;
+  tool: "claude_code";
+  kind: string;
+  externalSessionId: string;
+  repo: string;
+  repoCwd: string;
+  occurredAt: string;
+  payload: unknown;
+}
+
+interface SessionDTO {
+  session_id: string;
+  title: string;
+  repository_key: string;
+  turn_count: number;
+  lifecycle_status: string;
+}
+
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+test("pairs a device, replays a session, and reads it back through the dashboard API", { skip }, async () => {
+  const baseUrl = e2eURL as string;
+
+  // 1. A person requests a pairing code (dashboard-side; the plugin has no
+  // equivalent call, so this alone is a plain authenticated fetch).
+  const codeRes = await fetch(`${baseUrl}/api/v1/devices/code`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${sessionToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ tool: "claude_code", name: "e2e-smoke-device" }),
+  });
+  if (codeRes.status !== 200) assert.fail(`POST /devices/code: ${codeRes.status} ${await codeRes.text()}`);
+  const { code } = (await codeRes.json()) as { code: string };
+
+  // 2. The plugin's own exchange() — real client code, not a raw fetch.
+  const cfg: DeviceConfig = await exchange(baseUrl, code);
+  assert.ok(cfg.token && cfg.deviceId && cfg.ingestUrl);
+
+  const dataDir = mkdtempSync(join(tmpdir(), "trinity-e2e-"));
+  saveConfig(dataDir, cfg);
+
+  // 3. The plugin's own policy fetch — asserts the seeded repo is allowlisted.
+  const policy = await refreshPolicy(dataDir, cfg);
+  assert.ok(policy, "policy fetch failed");
+  const entry = policy!.workspaces.find((w) => w.canonicalRepo === "github.com/acme/claude-code-fixture");
+  assert.ok(entry, "seeded repo missing from policy");
+  assert.match(entry!.route, /^project:/);
+
+  // 4. Replay the Task 5.1 fixture through the real outbox/send path.
+  // Resolved from cwd (pnpm test always runs from capture/), not
+  // import.meta.url: tsc doesn't copy this .jsonl asset into dist-test/.
+  const fixturePath = join(process.cwd(), "test/testdata/claude_code_session.jsonl");
+  const lines = readFileSync(fixturePath, "utf8").trim().split("\n");
+  const externalSessionId = randomUUID();
+  for (const line of lines) {
+    const raw = JSON.parse(line) as Fixture;
+    const ev: CaptureEvent = { ...raw, captureEventId: randomUUID(), externalSessionId };
+    appendEvent(dataDir, ev);
+  }
+  await drain(dataDir, cfg);
+
+  // 5. Poll the dashboard API — real person-session bearer, not the device token.
+  let session: SessionDTO | undefined;
+  for (let attempt = 0; attempt < 20 && !session; attempt++) {
+    const res = await fetch(`${baseUrl}/api/v1/projects/${projectId}/people/${userId}/sessions`, {
+      headers: { Authorization: `Bearer ${sessionToken}` },
+    });
+    if (res.status !== 200) assert.fail(`GET .../sessions: ${res.status} ${await res.text()}`);
+    const body = (await res.json()) as { sessions: SessionDTO[] };
+    session = body.sessions.find((s) => s.turn_count === 2);
+    if (!session) await sleep(500);
+  }
+  assert.ok(session, "session with 2 turns never appeared");
+
+  assert.equal(session!.repository_key, "github.com/acme/claude-code-fixture");
+  assert.equal(session!.lifecycle_status, "complete");
+  // Title fallback: no gold title yet, so it's the first turn's prompt.
+  assert.equal(session!.title, "Add the claude_code adapter");
+
+  // 6. tool_calls carries no bodies — the sessions list DTO doesn't expose
+  // it, so this is a direct, read-only check against the seeded database.
+  const toolCalls = execFileSync(
+    "psql",
+    [postgresURL as string, "-tA", "-c",
+      `SELECT tool_calls::text FROM coding_session_turns t JOIN coding_sessions s ON s.id = t.session_id WHERE s.external_session_id = '${externalSessionId}' ORDER BY t.ordinal`],
+    { encoding: "utf8" },
+  );
+  assert.doesNotMatch(toolCalls, /MARKER_TOOL_INPUT_BODY_MUST_NOT_PROJECT/);
+  assert.doesNotMatch(toolCalls, /MARKER_TOOL_OUTPUT_BODY_MUST_NOT_PROJECT/);
+  assert.match(toolCalls, /Edit/, "expected the PostToolUse call's tool name to still be present");
+});

@@ -1,6 +1,7 @@
 // The `/trinity-connect` command: prompts for a pairing code, calls
 // POST /devices/exchange, writes the resulting DeviceConfig (spec §4.1).
 import { createInterface } from "node:readline/promises";
+import { pathToFileURL } from "node:url";
 import { saveConfig } from "./config.js";
 import type { DeviceConfig } from "./config.js";
 
@@ -15,7 +16,9 @@ async function promptForCode(): Promise<string> {
   }
 }
 
-async function exchange(baseUrl: string, code: string): Promise<DeviceConfig> {
+// Exported for the e2e smoke test, which drives this exact call against a
+// real backend rather than a raw fetch of its own.
+export async function exchange(baseUrl: string, code: string): Promise<DeviceConfig> {
   const res = await fetch(`${baseUrl}/api/v1/devices/exchange`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -59,4 +62,7 @@ async function main(): Promise<void> {
   }
 }
 
-main();
+const isMainModule = process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isMainModule) {
+  main();
+}
