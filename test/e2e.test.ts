@@ -5,7 +5,7 @@
 //
 // Skipped unless TRINITY_E2E_URL is set. Also requires (the backend has no
 // OAuth-free login, so these come from a one-off seed step — see
-// capture/README.md "e2e smoke" for the exact commands):
+// README.md "e2e smoke" for the exact commands):
 //   TRINITY_E2E_SESSION_TOKEN  a live person session's bearer token
 //   TRINITY_E2E_PROJECT_ID     the project that selected the fixture's repo
 //   TRINITY_E2E_USER_ID        that session's user id
@@ -34,7 +34,7 @@ const postgresURL = process.env.TRINITY_E2E_POSTGRES_URL;
 const ready = Boolean(e2eURL && sessionToken && projectId && userId && postgresURL);
 const skip = ready
   ? false
-  : "set TRINITY_E2E_URL, TRINITY_E2E_SESSION_TOKEN, TRINITY_E2E_PROJECT_ID, TRINITY_E2E_USER_ID, TRINITY_E2E_POSTGRES_URL to run (see capture/README.md)";
+  : "set TRINITY_E2E_URL, TRINITY_E2E_SESSION_TOKEN, TRINITY_E2E_PROJECT_ID, TRINITY_E2E_USER_ID, TRINITY_E2E_POSTGRES_URL to run (see README.md)";
 
 interface Fixture {
   captureEventId: string;
@@ -61,7 +61,10 @@ async function sleep(ms: number): Promise<void> {
 }
 
 test("pairs a device, replays a session, and reads it back through the dashboard API", { skip }, async () => {
-  const baseUrl = e2eURL as string;
+  if (!e2eURL || !sessionToken || !projectId || !userId || !postgresURL) {
+    assert.fail("E2E configuration is incomplete");
+  }
+  const baseUrl = e2eURL;
 
   // 1. A person requests a pairing code (dashboard-side; the plugin has no
   // equivalent call, so this alone is a plain authenticated fetch).
@@ -83,12 +86,12 @@ test("pairs a device, replays a session, and reads it back through the dashboard
   // 3. The plugin's own policy fetch — asserts the seeded repo is allowlisted.
   const policy = await refreshPolicy(dataDir, cfg);
   assert.ok(policy, "policy fetch failed");
-  const entry = policy!.workspaces.find((w) => w.canonicalRepo === "github.com/acme/claude-code-fixture");
+  const entry = policy.workspaces.find((w) => w.canonicalRepo === "github.com/acme/claude-code-fixture");
   assert.ok(entry, "seeded repo missing from policy");
-  assert.match(entry!.route, /^project:/);
+  assert.match(entry.route, /^project:/);
 
   // 4. Replay the Task 5.1 fixture through the real outbox/send path.
-  // Resolved from cwd (pnpm test always runs from capture/), not
+  // Resolved from cwd (pnpm test always runs from the repository root), not
   // import.meta.url: tsc doesn't copy this .jsonl asset into dist-test/.
   const fixturePath = join(process.cwd(), "test/testdata/claude_code_session.jsonl");
   const lines = readFileSync(fixturePath, "utf8").trim().split("\n");
@@ -113,16 +116,16 @@ test("pairs a device, replays a session, and reads it back through the dashboard
   }
   assert.ok(session, "session with 2 turns never appeared");
 
-  assert.equal(session!.repository_key, "github.com/acme/claude-code-fixture");
-  assert.equal(session!.lifecycle_status, "complete");
+  assert.equal(session.repository_key, "github.com/acme/claude-code-fixture");
+  assert.equal(session.lifecycle_status, "complete");
   // Title fallback: no gold title yet, so it's the first turn's prompt.
-  assert.equal(session!.title, "Add the claude_code adapter");
+  assert.equal(session.title, "Add the claude_code adapter");
 
   // 6. tool_calls carries no bodies — the sessions list DTO doesn't expose
   // it, so this is a direct, read-only check against the seeded database.
   const toolCalls = execFileSync(
     "psql",
-    [postgresURL as string, "-tA", "-c",
+    [postgresURL, "-tA", "-c",
       `SELECT tool_calls::text FROM coding_session_turns t JOIN coding_sessions s ON s.id = t.session_id WHERE s.external_session_id = '${externalSessionId}' ORDER BY t.ordinal`],
     { encoding: "utf8" },
   );

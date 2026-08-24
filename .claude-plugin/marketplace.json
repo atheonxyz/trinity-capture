@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "trinity",
+  "description": "Trinity's Claude Code plugins.",
+  "owner": {
+    "name": "Trinity"
+  },
+  "plugins": [
+    {
+      "name": "trinity-capture",
+      "description": "Captures Claude Code sessions into Trinity for allowlisted repositories.",
+      "version": "0.1.0",
+      "source": "./claude-code"
+    }
+  ]
+}

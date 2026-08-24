@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { saveConfig, savePolicy } from "../src/config.js";
 
-// pnpm test always runs from capture/.
+// pnpm test always runs from the repository root.
 const hookBin = join(process.cwd(), "claude-code", "dist", "claude-hook.js");
 const dialectStdinPath = join(process.cwd(), "test", "testdata", "dialect-SessionStart.json");
 
@@ -83,7 +83,7 @@ test("committed binary, authorized + allowlisted: appends the SessionStart pair"
 test("the repo-root marketplace manifest names trinity-capture at the packaged plugin dir", () => {
   // `/plugin marketplace add <repo>` reads .claude-plugin/marketplace.json at
   // the REPO root; the plugin's own manifest alone is not installable.
-  const manifestPath = join(process.cwd(), "..", ".claude-plugin", "marketplace.json");
+  const manifestPath = join(process.cwd(), ".claude-plugin", "marketplace.json");
   assert.ok(existsSync(manifestPath), `${manifestPath} is missing — the plugin is not installable without it`);
 
   interface MarketplaceManifest {
@@ -94,8 +94,8 @@ test("the repo-root marketplace manifest names trinity-capture at the packaged p
   const entry = manifest.plugins.find((p) => p.name === "trinity-capture");
   assert.ok(entry, "marketplace.json lists no trinity-capture plugin");
 
-  const sourceDir = resolve(process.cwd(), "..", entry.source);
-  assert.equal(sourceDir, resolve(process.cwd(), "claude-code"), `entry source ${entry.source} does not resolve to capture/claude-code`);
+  const sourceDir = resolve(process.cwd(), entry.source);
+  assert.equal(sourceDir, resolve(process.cwd(), "claude-code"), `entry source ${entry.source} does not resolve to claude-code`);
 
   // The entry must point at a real packaged plugin: its own manifest agrees
   // on the name, and the committed hook binary sits beneath it.

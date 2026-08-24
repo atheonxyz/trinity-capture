@@ -1,4 +1,4 @@
-# capture
+# Trinity capture plugins
 
 The client half of Trinity's IDE session ingestion: a shared TypeScript core plus one
 plugin per coding product. Claude Code ships in Phase 1; Codex and Cursor are designed
@@ -6,16 +6,17 @@ plugin per coding product. Claude Code ships in Phase 1; Codex and Cursor are de
 
 ## Setup (Claude Code)
 
-1. Install the `trinity-capture` plugin: `/plugin marketplace add <this repo>` (the
-   repo-root `.claude-plugin/marketplace.json` names the plugin), then
+1. Install the `trinity-capture` plugin with
+   `/plugin marketplace add https://github.com/atheonxyz/trinity-capture.git` (the
+   repository's `.claude-plugin/marketplace.json` names the plugin), then
    `/plugin install trinity-capture@trinity`.
 2. In any project, run `/trinity-connect <code>` with the pairing code shown on your
    Trinity dashboard's IDE integrations page (e.g. `/trinity-connect ABCD1234EFGH`).
    This exchanges the code for a device token and writes it to the plugin's own data
    directory — never into the repo, never into shell history.
 3. That's it. The plugin captures sessions automatically for every repository one of
-   your projects has selected; everything else produces zero network traffic (see
-   **Fail-closed guarantees** below).
+   your projects has selected. Unmatched repositories never send session events; when
+   the local policy is expired, the plugin may refresh that policy before matching.
 
 `TRINITY_BASE_URL` overrides the dashboard origin `/trinity-connect` exchanges the
 pairing code against, for pointing a local build at a non-production backend.
@@ -23,7 +24,7 @@ pairing code against, for pointing a local build at a non-production backend.
 ## Architecture
 
 ```
-capture/
+trinity-capture/
 ├── src/
 │   ├── config.ts      DeviceConfig + Policy: load/save from CLAUDE_PLUGIN_DATA
 │   ├── gate.ts         routeFor(): the fail-closed allowlist check
@@ -82,10 +83,10 @@ designed extension, not implemented yet.
   makes zero network requests, for any hook, ever.
 - **No policy, no send.** A missing or expired (15-minute TTL) capture-policy document
   fails every gate check closed — not just for a specific repo, for everything.
-- **Unmatched repo, no send.** A git remote that doesn't normalize to an allowlisted
-  `canonicalRepo` or one of its aliases produces zero network requests for that
-  workspace — not even identity. This is what makes a personal or unrelated repository
-  safe to open with the plugin installed.
+- **Unmatched repo, no session send.** A git remote that doesn't normalize to an
+  allowlisted `canonicalRepo` or one of its aliases never queues or sends a session
+  event. An expired policy can still trigger an authenticated policy refresh before
+  this local match.
 - **Absolute paths never leave the machine.** The raw hook payload's `cwd` and
   `transcript_path` are always stripped before send; only the repo-relative cwd travels.
 - **The outbox survives failure.** Every event is written to disk before any network
@@ -106,7 +107,6 @@ designed extension, not implemented yet.
 ## Dev commands
 
 ```bash
-cd capture
 pnpm install
 pnpm typecheck      # tsc -b
 pnpm test           # run pnpm typecheck first: node --test executes dist-test/
@@ -139,7 +139,7 @@ POSTGRES_URL="postgres://<role>@127.0.0.1:5433/<dedicated-db>?sslmode=disable" \
 go run ./cmd/e2eseed
 # → {"orgId":"...","projectId":"...","userId":"...","sessionToken":"...", ...}
 
-# 3. Run the smoke from capture/:
+# 3. Run the smoke from the repository root:
 TRINITY_E2E_URL=http://localhost:3000 \
 TRINITY_E2E_SESSION_TOKEN=<sessionToken> \
 TRINITY_E2E_PROJECT_ID=<projectId> \
