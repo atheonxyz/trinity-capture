@@ -1,0 +1,48 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node ${PLUGIN_ROOT}/dist/codex-hook.js SessionStart", "async": true }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node ${PLUGIN_ROOT}/dist/codex-hook.js UserPromptSubmit", "async": true }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          { "type": "command", "command": "node ${PLUGIN_ROOT}/dist/codex-hook.js PreToolUse", "async": true }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          { "type": "command", "command": "node ${PLUGIN_ROOT}/dist/codex-hook.js PostToolUse", "async": true }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node ${PLUGIN_ROOT}/dist/codex-hook.js Stop", "async": true }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node ${PLUGIN_ROOT}/dist/codex-hook.js SessionEnd", "async": true }
+        ]
+      }
+    ]
+  }
+}
