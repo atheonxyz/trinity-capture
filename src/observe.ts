@@ -2,6 +2,7 @@
 // §4.2): bounded, local, no network I/O.
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { relative } from "node:path";
 import type { CaptureEvent } from "./outbox.js";
 
@@ -22,7 +23,16 @@ export function gitRemoteOf(cwd: string): string | null {
 export function repoRelativeCwd(cwd: string): string {
   const top = git(cwd, ["rev-parse", "--show-toplevel"]);
   if (!top) return "";
-  const rel = relative(top, cwd);
+  // git resolves symlinks in --show-toplevel; match that so a cwd reached
+  // through a symlinked path (e.g. macOS's /var -> /private/var) still
+  // resolves to "." instead of a spurious "../../..." chain.
+  let resolvedCwd = cwd;
+  try {
+    resolvedCwd = realpathSync(cwd);
+  } catch {
+    // cwd may not exist on disk in edge cases — fall back to the raw path
+  }
+  const rel = relative(top, resolvedCwd);
   return rel === "" ? "." : rel;
 }
 
