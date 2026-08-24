@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { claimTurnKey, runHook } from "../src/hook-core.js";
+import { join, resolve, sep } from "node:path";
+import { claimTurnKey, runHook, turnKeyDir } from "../src/hook-core.js";
 import type { Dialect } from "../src/hook-core.js";
 import { saveConfig, savePolicy } from "../src/config.js";
 import type { DeviceConfig, Policy } from "../src/config.js";
@@ -69,6 +69,32 @@ test("a vendor id of exactly '..' does not sanitize to a parent-dir escape", () 
   assert.equal(entries.length, 1);
   assert.notEqual(entries[0], "..");
   assert.notEqual(entries[0], ".");
+});
+
+// --- turnKeyDir: sessionId is untrusted hook stdin too, same sink as vendorTurnId ---
+
+test("a hostile session id sanitizes to a safe turnkeys/ directory with no path traversal", () => {
+  const dataDir = tmpDataDir();
+  const sessionDir = turnKeyDir(dataDir, "claude_code", "../../../../tmp/evil");
+
+  const key = claimTurnKey(sessionDir, "P1");
+  const entries = readdirSync(sessionDir);
+  assert.equal(entries.length, 1);
+  // Idempotent, same as the vendor-id case: resolving again reads the same file back.
+  assert.equal(claimTurnKey(sessionDir, "P1"), key);
+});
+
+test("turnKeyDir never resolves outside dataDir/turnkeys/, for any session id", () => {
+  const dataDir = tmpDataDir();
+  const base = resolve(join(dataDir, "turnkeys"));
+
+  for (const hostile of ["../../../../tmp/evil", "..", ".", "/etc/passwd", "a/../../../b", ""]) {
+    const resolved = resolve(turnKeyDir(dataDir, "claude_code", hostile));
+    assert.ok(
+      resolved.startsWith(base + sep),
+      `turnKeyDir(${JSON.stringify(hostile)}) escaped turnkeys/: ${resolved}`,
+    );
+  }
 });
 
 test("an unseen vendor id on a non-prompt turn event lazily mints exactly one key under two racing processes", async () => {

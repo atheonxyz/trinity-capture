@@ -34,8 +34,14 @@ function sanitizeTurnId(id) {
     const mapped = id.replace(/[^A-Za-z0-9._-]/g, (ch) => Buffer.from(ch, "utf8").toString("hex"));
     return mapped === "." || mapped === ".." || mapped === "" ? Buffer.from(id, "utf8").toString("hex") || "empty" : mapped;
 }
-function turnKeyDir(dataDir, tool, sessionId) {
-    return join(dataDir, "turnkeys", `${tool}-${sessionId}`);
+// Exported for the same reason claimTurnKey is: a direct test that the
+// resolved directory can never escape dataDir/turnkeys/, whatever a hostile
+// session id contains.
+export function turnKeyDir(dataDir, tool, sessionId) {
+    // sessionId comes straight from untrusted hook stdin — join() does not
+    // neutralize a "/" or ".." embedded inside one path segment, so it goes
+    // through the same sanitizer as a vendor turn id before touching disk.
+    return join(dataDir, "turnkeys", `${tool}-${sanitizeTurnId(sessionId)}`);
 }
 // Exported for tests exercising the race directly (including across real
 // child processes, not just concurrent in-process calls, since Node's
