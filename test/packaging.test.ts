@@ -116,11 +116,11 @@ test("the repo-root marketplace manifest names trinity at the packaged plugin di
   assert.ok(existsSync(join(sourceDir, "dist", "claude-hook.js")), "the marketplace entry points at a dir without the committed build");
 });
 
-test("the connect command is manual-only and passes one pairing-code argument", () => {
+test("the connect command is manual-only and passes its pairing code and persistent data directory", () => {
   const command = readFileSync(join(process.cwd(), "claude-code", "commands", "connect.md"), "utf8");
   assert.match(command, /^argument-hint: \[pairing-code\]$/m);
   assert.match(command, /^arguments: \[pairing_code\]$/m);
   assert.match(command, /^disable-model-invocation: true$/m);
-  assert.match(command, /dist\/connect\.js" "\$pairing_code"/);
+  assert.match(command, /dist\/connect\.js" "\$pairing_code" "\$\{CLAUDE_PLUGIN_DATA\}"/);
   assert.doesNotMatch(command, /\$ARGUMENTS|\$[0-9]/);
 });

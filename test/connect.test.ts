@@ -50,9 +50,17 @@ async function startServer(): Promise<TestServer> {
   };
 }
 
-async function runConnect(dataDir: string, baseUrl: string, code?: string): Promise<number | null> {
-  const child = spawn(process.execPath, [join(process.cwd(), "dist-test/src/connect.js"), ...(code ? [code] : [])], {
-    env: { ...process.env, CLAUDE_PLUGIN_DATA: dataDir, TRINITY_BASE_URL: baseUrl },
+async function runConnect(dataDir: string, baseUrl: string, code?: string, dataDirArgument = false): Promise<number | null> {
+  const args = [join(process.cwd(), "dist-test/src/connect.js"), ...(code ? [code] : [])];
+  const env: NodeJS.ProcessEnv = { ...process.env, TRINITY_BASE_URL: baseUrl };
+  if (dataDirArgument) {
+    args.push(dataDir);
+    delete env.CLAUDE_PLUGIN_DATA;
+  } else {
+    env.CLAUDE_PLUGIN_DATA = dataDir;
+  }
+  const child = spawn(process.execPath, args, {
+    env,
     stdio: "ignore",
   });
   const [exitCode] = await once(child, "exit");
@@ -66,6 +74,17 @@ test("pairing fetches the initial policy before reporting the device connected",
     assert.equal(await runConnect(dataDir, server.baseUrl, "ABCD1234EFGH"), 0);
     assert.deepEqual(server.requests, ["POST /api/v1/devices/exchange", "GET /api/v1/ingest/policy"]);
     assert.equal(existsSync(join(dataDir, "policy.json")), true);
+  } finally {
+    await server.close();
+  }
+});
+
+test("pairing accepts Claude's substituted plugin data directory", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "trinity-connect-data-"));
+  const server = await startServer();
+  try {
+    assert.equal(await runConnect(dataDir, server.baseUrl, "ABCD1234EFGH", true), 0);
+    assert.equal(existsSync(join(dataDir, "config.json")), true);
   } finally {
     await server.close();
   }

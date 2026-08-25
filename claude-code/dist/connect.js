@@ -19,7 +19,7 @@ export async function exchange(baseUrl, code) {
     return { token: body.token, ingestUrl: body.ingestUrl, deviceId: body.deviceId };
 }
 async function main() {
-    const dataDir = process.env.CLAUDE_PLUGIN_DATA;
+    const dataDir = process.env.CLAUDE_PLUGIN_DATA ?? process.argv[3];
     if (!dataDir) {
         console.error("CLAUDE_PLUGIN_DATA is not set; cannot store credentials.");
         process.exitCode = 1;

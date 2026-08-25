@@ -6,6 +6,6 @@ disable-model-invocation: true
 allowed-tools: Bash(node:*)
 ---
 
-!`node "${CLAUDE_PLUGIN_ROOT}/dist/connect.js" "$pairing_code"`
+!`node "${CLAUDE_PLUGIN_ROOT}/dist/connect.js" "$pairing_code" "${CLAUDE_PLUGIN_DATA}"`
 
 Report the command's output to the user as-is. Do not take any further action.
