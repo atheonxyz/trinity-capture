@@ -33,10 +33,10 @@ function initRepo(remote: string): string {
   return dir;
 }
 
-function runHookBinary(dataDir: string, stdin: string): void {
+function runHookBinary(dataDir: string, eventName: string, stdin: string): void {
   // execFileSync throws on a non-zero exit — the hook contract is exit 0,
   // always.
-  execFileSync("node", [hookBin, "SessionStart"], {
+  execFileSync("node", [hookBin, eventName], {
     input: stdin,
     env: { ...process.env, CLAUDE_PLUGIN_DATA: dataDir },
   });
@@ -59,7 +59,7 @@ test("hook commands use path-safe exec form", () => {
 
 test("committed binary, unauthorized device: exits 0 and writes nothing", () => {
   const dataDir = mkdtempSync(join(tmpdir(), "trinity-pkg-data-"));
-  runHookBinary(dataDir, readFileSync(dialectStdinPath, "utf8"));
+  runHookBinary(dataDir, "SessionStart", readFileSync(dialectStdinPath, "utf8"));
   assert.ok(!existsSync(join(dataDir, "outbox")), "no config.json means fail closed: no outbox, no events");
 });
 
@@ -81,7 +81,7 @@ test("committed binary, authorized + allowlisted: appends the SessionStart pair"
   // exists on this machine.
   const stdin = JSON.parse(readFileSync(dialectStdinPath, "utf8")) as Record<string, unknown>;
   stdin.cwd = repo;
-  runHookBinary(dataDir, JSON.stringify(stdin));
+  runHookBinary(dataDir, "SessionStart", JSON.stringify(stdin));
 
   const files = readdirSync(join(dataDir, "outbox"));
   assert.equal(files.length, 2, "SessionStart appends the session event plus workspace.observed");
@@ -89,6 +89,34 @@ test("committed binary, authorized + allowlisted: appends the SessionStart pair"
     .map((f) => (JSON.parse(readFileSync(join(dataDir, "outbox", f), "utf8")) as { kind: string }).kind)
     .sort();
   assert.deepEqual(kinds, ["SessionStart", "workspace.observed"]);
+});
+
+test("committed binary omits the complete connect-command session from capture", () => {
+  // Given: pairing has just created credentials and synced an allowlist in this Claude session.
+  const dataDir = mkdtempSync(join(tmpdir(), "trinity-pkg-data-"));
+  saveConfig(dataDir, { token: "tok", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev1" });
+  savePolicy(dataDir, {
+    etag: "e1",
+    fetchedAt: Date.now(),
+    ttlSeconds: 900,
+    captureLevel: "metadata",
+    workspaces: [{ canonicalRepo: "github.com/acme/widgets", aliases: [], route: "project:p1" }],
+  });
+  const repo = initRepo("git@github.com:acme/widgets.git");
+  const sessionId = "pairing-session";
+
+  // When: Claude emits the command prompt and the lifecycle events that follow it.
+  for (const [eventName, payload] of [
+    ["UserPromptSubmit", { prompt: "/trinity:connect SECRET-FIXTURE" }],
+    ["Stop", { last_assistant_message: "Trinity connected" }],
+    ["SessionEnd", { reason: "other" }],
+  ] as const) {
+    runHookBinary(dataDir, eventName, JSON.stringify({ session_id: sessionId, hook_event_name: eventName, cwd: repo, ...payload }));
+  }
+
+  // Then: no credential or setup noise enters the durable outbox.
+  const outboxDir = join(dataDir, "outbox");
+  assert.deepEqual(existsSync(outboxDir) ? readdirSync(outboxDir) : [], []);
 });
 
 test("the repo-root marketplace manifest names trinity at the packaged plugin dir", () => {

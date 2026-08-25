@@ -8,6 +8,7 @@ import { appendEvent, drain } from "./outbox.js";
 import { gitRemoteOf, repoRelativeCwd, workspaceObserved } from "./observe.js";
 import { refreshPolicy } from "./send.js";
 const SHARED_PAYLOAD_KEYS = ["hook_event_name", "session_id", "prompt_id", "permission_mode"];
+const CONNECT_COMMAND = /^\/trinity:connect(?:\s|$)/;
 const EVENT_PAYLOAD_KEYS = {
     SessionStart: ["source"],
     UserPromptSubmit: ["prompt"],
@@ -25,6 +26,34 @@ function filterPayload(eventName, raw) {
 }
 function turnKeyFile(dataDir, tool, externalSessionId) {
     return join(dataDir, "turnkeys", `${tool}-${encodeURIComponent(externalSessionId)}`);
+}
+function suppressedSessionFile(dataDir, externalSessionId) {
+    return join(dataDir, "suppressed-sessions", `claude_code-${encodeURIComponent(externalSessionId)}`);
+}
+function shouldSuppressSession(dataDir, eventName, input) {
+    const sessionId = input.session_id ?? "";
+    if (eventName === "UserPromptSubmit" && typeof input.prompt === "string" && CONNECT_COMMAND.test(input.prompt.trimStart())) {
+        if (sessionId !== "") {
+            const file = suppressedSessionFile(dataDir, sessionId);
+            try {
+                mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+                writeFileSync(file, "", { mode: 0o600 });
+            }
+            catch {
+                return true;
+            }
+        }
+        return true;
+    }
+    if (sessionId === "")
+        return false;
+    try {
+        readFileSync(suppressedSessionFile(dataDir, sessionId));
+        return true;
+    }
+    catch {
+        return false;
+    }
 }
 function resolveTurnKey(dataDir, eventName, externalSessionId) {
     if (externalSessionId === "" || eventName === "SessionStart")
@@ -59,6 +88,8 @@ function resolveTurnKey(dataDir, eventName, externalSessionId) {
     return key;
 }
 export async function runHook(eventName, input, dataDir) {
+    if (shouldSuppressSession(dataDir, eventName, input))
+        return;
     const cfg = loadConfig(dataDir);
     if (!cfg)
         return;

@@ -15,6 +15,7 @@ type HookInput = {
 };
 
 const SHARED_PAYLOAD_KEYS = ["hook_event_name", "session_id", "prompt_id", "permission_mode"] as const;
+const CONNECT_COMMAND = /^\/trinity:connect(?:\s|$)/;
 const EVENT_PAYLOAD_KEYS: Record<string, readonly string[]> = {
   SessionStart: ["source"],
   UserPromptSubmit: ["prompt"],
@@ -33,6 +34,33 @@ function filterPayload(eventName: string, raw: HookInput): Record<string, unknow
 
 function turnKeyFile(dataDir: string, tool: string, externalSessionId: string): string {
   return join(dataDir, "turnkeys", `${tool}-${encodeURIComponent(externalSessionId)}`);
+}
+
+function suppressedSessionFile(dataDir: string, externalSessionId: string): string {
+  return join(dataDir, "suppressed-sessions", `claude_code-${encodeURIComponent(externalSessionId)}`);
+}
+
+function shouldSuppressSession(dataDir: string, eventName: string, input: HookInput): boolean {
+  const sessionId = input.session_id ?? "";
+  if (eventName === "UserPromptSubmit" && typeof input.prompt === "string" && CONNECT_COMMAND.test(input.prompt.trimStart())) {
+    if (sessionId !== "") {
+      const file = suppressedSessionFile(dataDir, sessionId);
+      try {
+        mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+        writeFileSync(file, "", { mode: 0o600 });
+      } catch {
+        return true;
+      }
+    }
+    return true;
+  }
+  if (sessionId === "") return false;
+  try {
+    readFileSync(suppressedSessionFile(dataDir, sessionId));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function resolveTurnKey(dataDir: string, eventName: string, externalSessionId: string): string | undefined {
@@ -65,6 +93,8 @@ function resolveTurnKey(dataDir: string, eventName: string, externalSessionId: s
 }
 
 export async function runHook(eventName: string, input: HookInput, dataDir: string): Promise<void> {
+  if (shouldSuppressSession(dataDir, eventName, input)) return;
+
   const cfg = loadConfig(dataDir);
   if (!cfg) return;
 
