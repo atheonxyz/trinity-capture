@@ -49,7 +49,7 @@ async function main() {
             process.exitCode = 1;
             return;
         }
-        console.log(refreshingExistingDevice ? "Trinity capture policy refreshed." : "Trinity connected. This device now captures sessions for allowlisted repositories.");
+        console.log(refreshingExistingDevice ? "Trinity capture policy refreshed." : "Trinity connected. Exit Claude Code and start a new session in an enabled repository to begin capture.");
     }
     catch (err) {
         console.error(err instanceof Error ? err.message : String(err));
