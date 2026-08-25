@@ -10,16 +10,18 @@ plugin per coding product. Claude Code ships in Phase 1; Codex and Cursor are de
    `/plugin marketplace add https://github.com/atheonxyz/trinity-capture.git` (the
    repository's `.claude-plugin/marketplace.json` names the plugin), then
    `/plugin install trinity-capture@trinity`.
-2. In any project, run `/trinity-connect <code>` with the pairing code shown on your
-   Trinity dashboard's IDE integrations page (e.g. `/trinity-connect ABCD1234EFGH`).
+2. In any project, run `/trinity-capture:trinity-connect <code>` with the pairing code
+   shown on your Trinity dashboard's IDE integrations page.
    This exchanges the code for a device token and writes it to the plugin's own data
    directory — never into the repo, never into shell history.
 3. That's it. The plugin captures sessions automatically for every repository in its
-   local allowlist. Unmatched repositories make no requests. Run `/trinity-connect`
+   local allowlist. Unmatched repositories make no requests. Run
+   `/trinity-capture:trinity-connect`
    again without a code to refresh policy for newly selected repositories.
 
-`TRINITY_BASE_URL` overrides the dashboard origin `/trinity-connect` exchanges the
-pairing code against, for pointing a local build at a non-production backend.
+`TRINITY_BASE_URL` overrides the dashboard origin
+`/trinity-capture:trinity-connect` exchanges the pairing code against, for pointing a
+local build at a non-production backend.
 
 ## Architecture
 
@@ -32,7 +34,7 @@ trinity-capture/
 │   ├── send.ts          sendBatch()/refreshPolicy(): the wire calls
 │   ├── observe.ts       gitRemoteOf()/workspaceObserved(): local git metadata
 │   ├── claude-hook.ts    the plugin entry every Claude Code hook invokes
-│   └── connect.ts        the /trinity-connect command
+│   └── connect.ts        the /trinity-capture:trinity-connect command
 └── claude-code/
     ├── .claude-plugin/plugin.json
     ├── hooks/hooks.json     registers the five lifecycle hooks
@@ -85,7 +87,7 @@ designed extension, not implemented yet.
   fails every gate check closed — not just for a specific repo, for everything.
 - **Unmatched repo, no request.** A git remote that doesn't normalize to an allowlisted
   `canonicalRepo` or one of its aliases never queues a session event or contacts
-  Trinity from that hook. `/trinity-connect` without a code refreshes policy for an
+  Trinity from that hook. `/trinity-capture:trinity-connect` without a code refreshes policy for an
   already-paired device.
 - **Absolute paths never leave the machine.** The raw hook payload's `cwd` and
   `transcript_path` are always stripped before send; only the repo-relative cwd travels.

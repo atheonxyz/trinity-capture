@@ -33,7 +33,7 @@ async function main() {
         let cfg;
         if (refreshingExistingDevice) {
             if (existingConfig === null) {
-                console.error("No pairing code provided. Usage: /trinity-connect <pairing-code>");
+                console.error("No pairing code provided. Usage: /trinity-capture:trinity-connect <pairing-code>");
                 process.exitCode = 1;
                 return;
             }
@@ -45,7 +45,7 @@ async function main() {
         }
         const policy = await refreshPolicy(dataDir, cfg);
         if (!isPolicyFresh(policy, Date.now())) {
-            console.error("Trinity is paired, but capture policy could not be synced. Run /trinity-connect again to retry.");
+            console.error("Trinity is paired, but capture policy could not be synced. Run /trinity-capture:trinity-connect again to retry.");
             process.exitCode = 1;
             return;
         }
