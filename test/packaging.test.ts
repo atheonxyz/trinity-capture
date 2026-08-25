@@ -91,7 +91,7 @@ test("committed binary, authorized + allowlisted: appends the SessionStart pair"
   assert.deepEqual(kinds, ["SessionStart", "workspace.observed"]);
 });
 
-test("the repo-root marketplace manifest names trinity-capture at the packaged plugin dir", () => {
+test("the repo-root marketplace manifest names trinity at the packaged plugin dir", () => {
   // `/plugin marketplace add <repo>` reads .claude-plugin/marketplace.json at
   // the REPO root; the plugin's own manifest alone is not installable.
   const manifestPath = join(process.cwd(), ".claude-plugin", "marketplace.json");
@@ -102,8 +102,8 @@ test("the repo-root marketplace manifest names trinity-capture at the packaged p
     plugins: { name: string; source: string; version: string }[];
   }
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as MarketplaceManifest;
-  const entry = manifest.plugins.find((p) => p.name === "trinity-capture");
-  assert.ok(entry, "marketplace.json lists no trinity-capture plugin");
+  const entry = manifest.plugins.find((p) => p.name === "trinity");
+  assert.ok(entry, "marketplace.json lists no trinity plugin");
 
   const sourceDir = resolve(process.cwd(), entry.source);
   assert.equal(sourceDir, resolve(process.cwd(), "claude-code"), `entry source ${entry.source} does not resolve to claude-code`);
@@ -117,7 +117,7 @@ test("the repo-root marketplace manifest names trinity-capture at the packaged p
 });
 
 test("the connect command is manual-only and passes one pairing-code argument", () => {
-  const command = readFileSync(join(process.cwd(), "claude-code", "commands", "trinity-connect.md"), "utf8");
+  const command = readFileSync(join(process.cwd(), "claude-code", "commands", "connect.md"), "utf8");
   assert.match(command, /^argument-hint: \[pairing-code\]$/m);
   assert.match(command, /^arguments: \[pairing_code\]$/m);
   assert.match(command, /^disable-model-invocation: true$/m);
