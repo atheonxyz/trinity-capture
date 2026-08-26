@@ -10,7 +10,7 @@ import { runHook } from "./hook-core.js";
 import { DEFAULT_BASE_URL } from "./connect.js";
 import { codexHome, promotePendingConfig } from "./codex-connect.js";
 
-function str(payload: Record<string, unknown>, key: string): string | null {
+function stringField(payload: Record<string, unknown>, key: string): string | null {
   const value = payload[key];
   return typeof value === "string" && value !== "" ? value : null;
 }
@@ -22,8 +22,8 @@ function suppressedSessionFile(dataDir: string, sessionId: string): string {
 }
 
 function suppressConnectSession(dataDir: string, event: string, payload: Record<string, unknown>): boolean {
-  const sessionId = str(payload, "session_id");
-  const prompt = str(payload, "prompt");
+  const sessionId = stringField(payload, "session_id");
+  const prompt = stringField(payload, "prompt");
   if (event === "UserPromptSubmit" && prompt !== null && CONNECT_COMMAND.test(prompt.trimStart())) {
     if (sessionId !== null) {
       const file = suppressedSessionFile(dataDir, sessionId);
@@ -66,18 +66,15 @@ const ALLOW_PER_EVENT: Record<string, readonly string[]> = {
 
 export const codexDialect: Dialect = {
   tool: "codex",
-  sessionId: (_event, payload) => str(payload, "session_id"),
-  cwd: (_event, payload) => str(payload, "cwd"),
+  sessionId: (_event, payload) => stringField(payload, "session_id"),
+  cwd: (_event, payload) => stringField(payload, "cwd"),
   // The observed correlation field (C2.0): a turn-scoped event's own
   // turn_id, never a turn IDENTITY — hook-core mints the actual turn key,
   // correlated by this vendor id.
-  vendorTurnId: (_event, payload) => str(payload, "turn_id"),
+  vendorTurnId: (_event, payload) => stringField(payload, "turn_id"),
   isPromptSubmit: (event) => event === "UserPromptSubmit",
   isSessionStart: (event) => event === "SessionStart",
-  // Codex documents its hooks as async-capable (spec's global constraints).
-  // Unlike Claude's captured hooks.json, nothing in the capture singles out
-  // one Codex event as synchronous, so every event may attempt the open
-  // multi-batch drain below.
+  // SessionEnd stays append-only and timeout-bounded, so it never drains.
   drainsOn: (event) => event !== "SessionEnd",
   suppress: suppressConnectSession,
   allow: (event) => [...ALLOW_EVERY_EVENT, ...(ALLOW_PER_EVENT[event] ?? [])],

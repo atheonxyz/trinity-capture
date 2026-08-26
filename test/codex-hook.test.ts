@@ -108,8 +108,9 @@ test("PreToolUse and PostToolUse forward only allowlisted metadata — no tool b
   const repo = initRepo("git@github.com:acme/widgets.git");
 
   const lines = loadFixtureLines();
-  const preToolUse = lines.find((l) => l.hook_event_name === "PreToolUse")!;
-  const postToolUse = lines.find((l) => l.hook_event_name === "PostToolUse")!;
+  const preToolUse = lines.find((l) => l.hook_event_name === "PreToolUse");
+  const postToolUse = lines.find((l) => l.hook_event_name === "PostToolUse");
+  assert.ok(preToolUse && postToolUse);
 
   // some_future_vendor_field proves the allowlist drops what it has not
   // heard of, not just the two body fields the current capture happens to use.
@@ -129,8 +130,9 @@ test("PreToolUse and PostToolUse forward only allowlisted metadata — no tool b
   }
 
   const events = readEvents(dataDir);
-  const pre = events.find((e) => e.kind === "PreToolUse")!;
-  const post = events.find((e) => e.kind === "PostToolUse")!;
+  const pre = events.find((e) => e.kind === "PreToolUse");
+  const post = events.find((e) => e.kind === "PostToolUse");
+  assert.ok(pre && post);
   assert.equal(pre.payload.tool_use_id, "vendor-id-003");
   assert.equal(post.payload.tool_use_id, "vendor-id-003");
   assert.ok(!("cwd" in pre.payload) && !("cwd" in post.payload), "the absolute cwd must never ride the payload");
@@ -179,9 +181,10 @@ test("out-of-order delivery still correlates by turn_id, not arrival order", asy
   const repo = initRepo("git@github.com:acme/widgets.git");
 
   const lines = loadFixtureLines();
-  const prompt1 = lines.find((l) => l.hook_event_name === "UserPromptSubmit" && l.turn_id === "vendor-id-002")!;
-  const prompt2 = lines.find((l) => l.hook_event_name === "UserPromptSubmit" && l.turn_id === "vendor-id-004")!;
-  const lateForTurn1 = lines.find((l) => l.hook_event_name === "PostToolUse" && l.turn_id === "vendor-id-002")!;
+  const prompt1 = lines.find((l) => l.hook_event_name === "UserPromptSubmit" && l.turn_id === "vendor-id-002");
+  const prompt2 = lines.find((l) => l.hook_event_name === "UserPromptSubmit" && l.turn_id === "vendor-id-004");
+  const lateForTurn1 = lines.find((l) => l.hook_event_name === "PostToolUse" && l.turn_id === "vendor-id-002");
+  assert.ok(prompt1 && prompt2 && lateForTurn1);
 
   await runCodexHook({ ...prompt1, cwd: repo }, dataDir);
   await runCodexHook({ ...prompt2, cwd: repo }, dataDir);
@@ -212,7 +215,8 @@ test("SessionEnd forwards the session's end reason", async () => {
   savePolicy(dataDir, freshPolicy("github.com/acme/widgets"));
   const repo = initRepo("git@github.com:acme/widgets.git");
 
-  const sessionEnd = loadFixtureLines().find((l) => l.hook_event_name === "SessionEnd")!;
+  const sessionEnd = loadFixtureLines().find((l) => l.hook_event_name === "SessionEnd");
+  assert.ok(sessionEnd);
   await runCodexHook({ ...sessionEnd, cwd: repo }, dataDir);
 
   const events = readEvents(dataDir);

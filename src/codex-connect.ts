@@ -18,6 +18,10 @@ import { DEFAULT_BASE_URL, exchange, supportsNodeVersion } from "./connect.js";
 import { saveConfig } from "./config.js";
 import type { DeviceConfig } from "./config.js";
 
+const CAPTURE_DIR = "trinity-capture";
+const PENDING_CONFIG_FILE = "pending-device.json";
+const CONFIRMED_CONFIG_FILE = "connected-device.json";
+
 // Exported so codex-hook.ts's promotion step and this suite's tests resolve
 // the exact same home and pending path.
 export function codexHome(env: NodeJS.ProcessEnv): string {
@@ -25,21 +29,21 @@ export function codexHome(env: NodeJS.ProcessEnv): string {
 }
 
 export function pendingConfigPath(home: string): string {
-  return join(home, "trinity-capture", "pending-device.json");
+  return join(home, CAPTURE_DIR, PENDING_CONFIG_FILE);
 }
 
 export function confirmedConfigPath(home: string): string {
-  return join(home, "trinity-capture", "connected-device.json");
+  return join(home, CAPTURE_DIR, CONFIRMED_CONFIG_FILE);
 }
 
-function writePrivateJSON(home: string, name: string, value: unknown): void {
-  const dir = join(home, "trinity-capture");
+function writePrivateJSON(home: string, filename: string, value: unknown): void {
+  const dir = join(home, CAPTURE_DIR);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   chmodSync(dir, 0o700);
-  const path = join(dir, name);
-  const tmp = join(dir, `.${name}.${process.pid}.${randomUUID()}.tmp`);
-  writeFileSync(tmp, JSON.stringify(value, null, 2), { flag: "wx", mode: 0o600 });
-  renameSync(tmp, path);
+  const filePath = join(dir, filename);
+  const tmpPath = join(dir, `.${filename}.${process.pid}.${randomUUID()}.tmp`);
+  writeFileSync(tmpPath, JSON.stringify(value, null, 2), { flag: "wx", mode: 0o600 });
+  renameSync(tmpPath, filePath);
 }
 
 // Atomic (temp+rename, same directory) and mode-0600. This directory is
@@ -48,10 +52,10 @@ function writePrivateJSON(home: string, name: string, value: unknown): void {
 // credential file is.
 export function writePendingConfig(home: string, cfg: DeviceConfig): void {
   rmSync(confirmedConfigPath(home), { force: true });
-  writePrivateJSON(home, "pending-device.json", cfg);
+  writePrivateJSON(home, PENDING_CONFIG_FILE, cfg);
 }
 
-function trustedDeviceConfig(value: unknown, baseUrl: string): DeviceConfig | null {
+function parseTrustedDeviceConfig(value: unknown, baseUrl: string): DeviceConfig | null {
   if (typeof value !== "object" || value === null) return null;
   if (!("token" in value) || typeof value.token !== "string" || value.token === "") return null;
   if (!("deviceId" in value) || typeof value.deviceId !== "string" || value.deviceId === "") return null;
@@ -85,11 +89,11 @@ export function promotePendingConfig(
 ): void {
   const pending = pendingConfigPath(home);
   if (!existsSync(pending)) return;
-  const cfg = trustedDeviceConfig(JSON.parse(readFileSync(pending, "utf8")), baseUrl);
+  const cfg = parseTrustedDeviceConfig(JSON.parse(readFileSync(pending, "utf8")), baseUrl);
   if (!cfg) return;
 
   saveConfig(pluginDataDir, cfg);
-  writePrivateJSON(home, "connected-device.json", { deviceId: cfg.deviceId });
+  writePrivateJSON(home, CONFIRMED_CONFIG_FILE, { deviceId: cfg.deviceId });
   unlinkSync(pending);
 }
 
