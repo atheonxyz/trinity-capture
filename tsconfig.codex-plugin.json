@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "codex/dist",
+    "composite": false,
+    "declaration": false,
+    "incremental": false
+  },
+  "include": [
+    "src/hook-core.ts",
+    "src/config.ts",
+    "src/gate.ts",
+    "src/outbox.ts",
+    "src/observe.ts",
+    "src/send.ts",
+    "src/codex-hook.ts",
+    "src/codex-connect.ts"
+  ]
+}

@@ -25,3 +25,5 @@ jobs:
       - run: git diff --exit-code -- claude-code/dist
       - run: pnpm build:plugin-cursor
       - run: git diff --exit-code -- cursor/dist
+      - run: pnpm build:codex
+      - run: git diff --exit-code -- codex/dist

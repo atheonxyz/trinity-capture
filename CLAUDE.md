@@ -14,37 +14,38 @@ pnpm install
 pnpm typecheck
 pnpm test
 pnpm build:plugin          # regenerate claude-code/dist/
+pnpm build:codex           # regenerate codex/dist/
 pnpm build:plugin-cursor   # regenerate cursor/dist/
 ```
 
 ## Structure
 
-- `src/` owns the shared capture core plus every product's own entrypoint
-  (`claude-hook.ts`/`connect.ts` for Claude Code, `cursor-hook.ts`/`cursor-connect.ts`
-  for Cursor).
-- `claude-code/` is the packaged plugin installed by Claude Code.
-- `cursor/` is the packaged plugin sideloaded/installed by Cursor.
-- `.claude-plugin/marketplace.json` and `.cursor-plugin/marketplace.json` make the
-  repository installable as a marketplace for each product respectively — two separate
-  manifests, one per IDE's own plugin ecosystem.
-- `test/` covers the capture core, packaging, privacy boundaries, and the env-gated
-  live-backend smoke tests (`e2e.test.ts` for Claude Code, `e2e-cursor.test.ts` for
-  Cursor).
+- `src/` owns the shared capture core plus one `<product>-hook.ts` (Dialect table +
+  hook entrypoint) and, where a product's skill layer can't reach its own data
+  directory directly, one `<product>-connect.ts` per product.
+- `claude-code/`, `codex/`, and `cursor/` are the three self-contained packaged plugins.
+  Their marketplace manifests are separate because each host has its own plugin ecosystem.
+- `test/` covers the capture core, per-product packaging (dist execution, marketplace
+  listing, uninstall self-containment), per-product connect flows, privacy boundaries,
+  and each product's env-gated live-backend smoke test.
 
 ## Invariants
 
 - No daemon: every hook invocation is a short-lived process.
 - Never forward local absolute paths, tool call bodies, or PII (Cursor's captured
-  stream also carries `user_email` — never forwarded).
+  stream also carries `user_email`, which is never forwarded). Use an allowlist per
+  event, never a strip list.
 - Store an event in the local outbox before attempting network I/O.
 - Unmatched repositories never send session events.
-- `claude-code/dist/` and `cursor/dist/` are committed. Regenerate the relevant one
-  after changing `src/`, and keep the generated diff in the same commit.
-- Each product's marketplace entry and its own plugin manifest versions must agree.
+- Every product's `dist/` is committed. Regenerate the relevant one after changing
+  `src/`, and keep the generated diff in the same commit; CI diffs all three.
+- Every product's marketplace entry and plugin manifest versions must agree.
 - Keep production runtime dependencies at zero unless explicitly approved.
-- A Cursor event whose `workspace_roots` names more than one repository is dropped
-  whole (never guessed at) — see README's Multi-root fail-closed section.
-- Cursor has no `CLAUDE_PLUGIN_DATA`/`PLUGIN_DATA` equivalent: credentials live in the
-  platform's secured per-user application-data directory (`TRINITY_CAPTURE_DATA`
-  overridable), created 0700 with the credential file 0600 — see README's Credential
-  home section.
+- A product whose plugin skill/command layer cannot reach its secured data directory
+  directly (Codex: skills run without `PLUGIN_DATA`, only hook commands get it) pairs
+  through a pending-file → data-directory promotion instead of writing credentials
+  straight from the skill; the promoted credential file and the directory holding a
+  pending record are always mode 0600 / 0700.
+- Cursor events whose `workspace_roots` name anything other than one repository are
+  dropped whole, never guessed at. Cursor credentials live in the platform's secured
+  per-user application-data directory because the host supplies no plugin data path.
