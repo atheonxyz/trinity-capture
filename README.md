@@ -44,7 +44,8 @@ private repo. Publishing there is a separate, later release decision.
    script rather than a speculative slash command:
    `node ~/.cursor/plugins/local/trinity-capture/dist/cursor-connect.js <code>` with the
    pairing code shown on your Trinity dashboard's IDE integrations page. This writes a
-   mode-0600 `DeviceConfig` under a mode-0700 directory — never into the repo, never into
+   mode-0600 `DeviceConfig`, syncs the repository allowlist, and reports success only
+   when both are ready under a mode-0700 directory — never into the repo, never into
    shell history, and never into a Cursor plugin variable (those are dashboard-entered
    and would replace this pairing UX).
 3. That's it. The plugin captures `cursor-agent` CLI sessions automatically for every

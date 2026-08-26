@@ -5,6 +5,8 @@ import { pathToFileURL } from "node:url";
 import { cursorDialect } from "./cursor-hook.js";
 import { exchange } from "./connect.js";
 import { saveConfig } from "./config.js";
+import { isPolicyFresh } from "./gate.js";
+import { refreshPolicy } from "./send.js";
 const DEFAULT_BASE_URL = "https://api.usetrinity.ai";
 const MIN_NODE_MAJOR = 20;
 function securePosixMode(path, mode) {
@@ -18,6 +20,10 @@ export async function connectCursor(baseUrl, code, dataDir) {
     securePosixMode(dataDir, 0o700);
     saveConfig(dataDir, cfg);
     securePosixMode(join(dataDir, "config.json"), 0o600);
+    const policy = await refreshPolicy(dataDir, cfg);
+    if (!isPolicyFresh(policy, Date.now())) {
+        throw new Error("Trinity paired the device, but capture policy could not be synced. Run the connect command again.");
+    }
 }
 async function main() {
     const nodeMajorVersion = Number(process.versions.node.split(".")[0]);

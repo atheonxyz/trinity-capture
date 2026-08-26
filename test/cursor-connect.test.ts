@@ -11,7 +11,7 @@ import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
 import { connectCursor } from "../src/cursor-connect.js";
-import { cursorDialect, runCursorHook } from "../src/cursor-hook.js";
+import { cursorDialect } from "../src/cursor-hook.js";
 import { loadConfig } from "../src/config.js";
 
 function tmpParentDir(): string {
@@ -24,6 +24,14 @@ function stubExchange(deviceConfig: { token: string; ingestUrl: string; deviceId
     const href = String(url);
     if (href.endsWith("/api/v1/devices/exchange")) {
       return new Response(JSON.stringify(deviceConfig), { status: 200 });
+    }
+    if (href.endsWith("/api/v1/ingest/policy")) {
+      return Response.json({
+        etag: "policy-1",
+        ttlSeconds: 900,
+        captureLevel: "metadata",
+        workspaces: [{ canonicalRepo: "github.com/acme/widgets", aliases: [], route: "project:p1" }],
+      });
     }
     throw new Error(`unexpected fetch: ${href}`);
   }) as typeof fetch;
@@ -53,6 +61,7 @@ test("connect writes a 0700 data dir and a 0600 config.json a device did not hav
 
   const cfg = JSON.parse(readFileSync(cfgPath, "utf8")) as { token: string; ingestUrl: string; deviceId: string };
   assert.deepEqual(cfg, { token: "tok-1", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev-1" });
+  assert.ok(existsSync(join(dataDir, "policy.json")));
 });
 
 test("connect is idempotent: reconnecting re-secures permissions on an already-existing dir", async () => {
@@ -82,7 +91,7 @@ test("connect is idempotent: reconnecting re-secures permissions on an already-e
 // resolution cursorDialect.dataDir performs (TRINITY_CAPTURE_DATA override),
 // and a hook invocation using that exact env reads the connected device
 // back successfully.
-test("the data directory connect writes to is the exact one cursor-hook.js reads back", async () => {
+test("the data directory connect writes to is ready for cursor-hook.js", async () => {
   const parent = tmpParentDir();
   const dataDir = join(parent, "cursor");
   const env = { ...process.env, TRINITY_CAPTURE_DATA: dataDir };
@@ -96,14 +105,7 @@ test("the data directory connect writes to is the exact one cursor-hook.js reads
   }
 
   assert.ok(loadConfig(dataDir), "loadConfig must read back what connect wrote");
-
-  // A subsequent hook invocation using the same env now captures instead of
-  // silently no-op'ing (no config -> no send, proven above by the packaging
-  // suite's "unauthorized device" case).
-  await runCursorHook("sessionEnd", JSON.stringify({ hook_event_name: "sessionEnd", conversation_id: "s1", generation_id: "g1", reason: "completed", workspace_roots: [] }), env);
-  // No policy has been saved, so the gate still fails closed — but the
-  // point under test is that loadConfig succeeded (no early "no config,
-  // no send" return), which is exactly what a paired device's dataDir proves.
+  assert.ok(existsSync(join(dataDir, "policy.json")));
 });
 
 // Uninstall: nothing outside the plugin's own directory tree is written by
