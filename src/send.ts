@@ -2,7 +2,7 @@ import type { DeviceConfig, Policy } from "./config.js";
 import { loadPolicy, savePolicy } from "./config.js";
 import type { CaptureEvent } from "./outbox.js";
 
-export const REQUEST_TIMEOUT_MS = 10_000;
+export const REQUEST_TIMEOUT_MS = 5_000;
 
 export interface ItemResult {
   captureEventId: string;
