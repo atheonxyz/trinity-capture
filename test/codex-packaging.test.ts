@@ -105,6 +105,13 @@ test("committed binary, PostToolUse: promotes a pending device config into PLUGI
 
   const stdin = loadFixtureLine("PostToolUse");
   stdin.cwd = repo;
+  savePolicy(dataDir, {
+    etag: "e1",
+    fetchedAt: Date.now(),
+    ttlSeconds: 900,
+    captureLevel: "metadata",
+    workspaces: [{ canonicalRepo: "github.com/acme/widgets", aliases: [], route: "project:p1" }],
+  });
   execFileSync("node", [hookBin, "PostToolUse"], {
     input: JSON.stringify(stdin),
     env: { ...process.env, PLUGIN_DATA: dataDir, CODEX_HOME: codexHome, TRINITY_BASE_URL: "http://127.0.0.1:1" },
@@ -143,10 +150,12 @@ test("the repo-root marketplace manifest names trinity-capture at the packaged c
   const plugin = JSON.parse(readFileSync(join(sourceDir, ".codex-plugin", "plugin.json"), "utf8")) as {
     name: string;
     skills?: string;
+    hooks?: unknown;
     interface?: { displayName?: string };
   };
   assert.equal(plugin.name, entry.name);
   assert.equal(plugin.skills, "./skills/", "plugin.json must expose the packaged connect skill");
+  assert.equal(plugin.hooks, undefined, "Codex discovers the default hooks/hooks.json without a manifest override");
   assert.equal(plugin.interface?.displayName, "Trinity Capture");
   assert.ok(existsSync(join(sourceDir, "dist", "codex-hook.js")), "the marketplace entry points at a dir without the committed build");
 });
@@ -164,13 +173,15 @@ test("uninstall: hooks.json and the connect skill reference nothing outside the 
   const hooksPath = join(process.cwd(), "codex", "hooks", "hooks.json");
   const hooksRaw = readFileSync(hooksPath, "utf8");
   interface HooksManifest {
-    hooks: Record<string, { hooks: { command: string }[] }[]>;
+    hooks: Record<string, { matcher?: string; hooks: { command: string }[] }[]>;
   }
   const hooks = JSON.parse(hooksRaw) as HooksManifest;
 
   const commands: string[] = [];
   for (const entries of Object.values(hooks.hooks)) {
     for (const entry of entries) {
+      const matcher = entry.matcher;
+      if (matcher) assert.doesNotThrow(() => new RegExp(matcher), `invalid hook matcher: ${matcher}`);
       for (const h of entry.hooks) commands.push(h.command);
     }
   }
@@ -182,6 +193,7 @@ test("uninstall: hooks.json and the connect skill reference nothing outside the 
 
   const skillPath = join(process.cwd(), "codex", "skills", "trinity-connect", "SKILL.md");
   const skillRaw = readFileSync(skillPath, "utf8");
-  assert.match(skillRaw, /\$\{PLUGIN_ROOT\}\/dist\//, "the connect skill must invoke the plugin's own dist, not an external path");
+  assert.match(skillRaw, /codex plugin list --json/, "the connect skill must resolve its installed path through Codex");
+  assert.match(skillRaw, /trinity-capture@trinity/, "the connect skill must resolve the exact installed plugin");
   assert.doesNotMatch(skillRaw, /\/Users\/|\/home\//, "the connect skill must not embed an absolute local path");
 });

@@ -124,9 +124,6 @@ test("pairs a codex device, replays the real captured hook stream through the re
     const payload = { ...raw, cwd: repo, session_id: externalSessionId };
     await runHook(codexDialect, raw.hook_event_name as string, JSON.stringify(payload), env);
   }
-  // Belt-and-braces final drain: codexDialect.drainsOn is true for every
-  // event, so each runHook call above already attempted one, but a slow
-  // network mid-replay could still leave a batch queued.
   await drain(dataDir, cfg, { inline: false, deadline: 0 });
 
   // 5. Poll the dashboard API — real person-session bearer, not the device token.

@@ -72,13 +72,10 @@ export const codexDialect = {
     vendorTurnId: (_event, payload) => stringField(payload, "turn_id"),
     isPromptSubmit: (event) => event === "UserPromptSubmit",
     isSessionStart: (event) => event === "SessionStart",
-    // SessionEnd stays append-only and timeout-bounded, so it never drains.
-    drainsOn: (event) => event !== "SessionEnd",
+    drainsOn: (event) => event === "Stop" || event === "SessionEnd",
     suppress: suppressConnectSession,
     allow: (event) => [...ALLOW_EVERY_EVENT, ...(ALLOW_PER_EVENT[event] ?? [])],
-    // Async-capable, like claude_code's: the open multi-batch drain in
-    // hook-core is fine (contrast Cursor's drainInline: true).
-    drainInline: false,
+    drainInline: true,
     // The proven official env var (C2.0) for hook COMMANDS. TRINITY_CAPTURE_DATA
     // overrides it for the documented fallback (an installer-managed
     // user-level hooks stanza outside the plugin layer, README's "Fallback"
@@ -98,7 +95,7 @@ async function cli() {
         try {
             const dataDir = codexDialect.dataDir(process.env);
             if (dataDir) {
-                promotePendingConfig(codexHome(process.env), dataDir, process.env.TRINITY_BASE_URL ?? DEFAULT_BASE_URL);
+                await promotePendingConfig(codexHome(process.env), dataDir, process.env.TRINITY_BASE_URL ?? DEFAULT_BASE_URL);
             }
         }
         catch (error) {

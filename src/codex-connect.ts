@@ -15,12 +15,18 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { DEFAULT_BASE_URL, exchange, supportsNodeVersion } from "./connect.js";
-import { saveConfig } from "./config.js";
+import { loadPolicy, saveConfig } from "./config.js";
 import type { DeviceConfig } from "./config.js";
+import { isPolicyFresh } from "./gate.js";
+import { refreshPolicy } from "./send.js";
 
 const CAPTURE_DIR = "trinity-capture";
 const PENDING_CONFIG_FILE = "pending-device.json";
 const CONFIRMED_CONFIG_FILE = "connected-device.json";
+const TRINITY_INGEST_ORIGINS = new Set([
+  "https://api.usetrinity.ai",
+  "https://api-staging.usetrinity.ai",
+]);
 
 // Exported so codex-hook.ts's promotion step and this suite's tests resolve
 // the exact same home and pending path.
@@ -63,7 +69,7 @@ function parseTrustedDeviceConfig(value: unknown, baseUrl: string): DeviceConfig
   try {
     const ingest = new URL(value.ingestUrl);
     const base = new URL(baseUrl);
-    if (ingest.origin !== base.origin || !ingest.pathname.endsWith("/api/v1/ingest/batches")) return null;
+    if ((ingest.origin !== base.origin && !TRINITY_INGEST_ORIGINS.has(ingest.origin)) || !ingest.pathname.endsWith("/api/v1/ingest/batches")) return null;
   } catch (error) {
     if (error instanceof TypeError) return null;
     throw error;
@@ -82,17 +88,20 @@ function parseTrustedDeviceConfig(value: unknown, baseUrl: string): DeviceConfig
 // Best-effort by contract: the caller is a hook, which must never surface a
 // failure to the IDE, so every failure here is swallowed by the caller, not
 // this function.
-export function promotePendingConfig(
+export async function promotePendingConfig(
   home: string,
   pluginDataDir: string,
   baseUrl = DEFAULT_BASE_URL,
-): void {
+): Promise<void> {
   const pending = pendingConfigPath(home);
   if (!existsSync(pending)) return;
   const cfg = parseTrustedDeviceConfig(JSON.parse(readFileSync(pending, "utf8")), baseUrl);
   if (!cfg) return;
 
   saveConfig(pluginDataDir, cfg);
+  let policy = loadPolicy(pluginDataDir);
+  if (!isPolicyFresh(policy, Date.now())) policy = await refreshPolicy(pluginDataDir, cfg);
+  if (!isPolicyFresh(policy, Date.now())) return;
   writePrivateJSON(home, CONFIRMED_CONFIG_FILE, { deviceId: cfg.deviceId });
   unlinkSync(pending);
 }

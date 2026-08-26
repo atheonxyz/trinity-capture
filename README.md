@@ -39,12 +39,13 @@ local build at a non-production backend.
    `.agents/plugins/marketplace.json` names it for a marketplace-style add where Codex's
    plugin tooling supports one — see your Codex CLI's own plugin docs for the exact
    install command, since this is an internal/sideload distribution, not a public
-   marketplace listing).
+   marketplace listing). Start a new Codex session and approve the six Trinity hooks
+   once; Codex deliberately skips newly installed hooks until you trust them.
 2. In any project, run the `trinity-connect` skill with the pairing code shown on your
    Trinity dashboard's IDE integrations page. Codex plugin **skills** run without the
-   `PLUGIN_DATA` env var a hook **command** gets (empirically confirmed against
-   codex-cli 0.149.0-alpha.4.3 — only hook commands receive it), so the skill cannot
-   write this device's credential file directly. Instead it:
+   plugin root or `PLUGIN_DATA` env vars a hook **command** gets, and its exchange needs
+   network plus access to `~/.codex`. It therefore resolves its installed path with
+   `codex plugin list --json` and asks to run the exchange outside the sandbox. Then it:
    - exchanges the pairing code and writes the result to a mode-0600 pending record
      under `$CODEX_HOME/trinity-capture/pending-device.json` (`$CODEX_HOME` defaults to
      `~/.codex`);
@@ -56,7 +57,8 @@ local build at a non-production backend.
      promoted it. If hooks are disabled or untrusted for a session, the pending record
      stays put — still secured — until a later trusted invocation promotes it; running
      any Codex tool call and re-checking status confirms this.
-3. That's it. The plugin captures sessions automatically for every repository one of
+3. Start a new Codex session. Its SessionStart hook fetches the allowlist, then the
+   plugin captures sessions automatically for every repository one of
    your projects has selected, the same fail-closed rules as Claude Code's setup above.
 
 `TRINITY_BASE_URL` and `CODEX_HOME` both override their defaults the same way as
@@ -126,8 +128,9 @@ extraction, its payload allowlist, its data directory, and two predicates —
 `isSessionStart`, `drainsOn` — over its own event vocabulary) that `hook-core.ts`'s
 `runHook()` drives: it checks the gate, filters the payload to the capture level, appends
 it to the local outbox, and, only when `drainsOn(event)` says so, drains the outbox to
-the backend. Claude Code and Codex both skip `SessionEnd`, which their hosts run
-synchronously with a tight timeout; whether a given event drains at all is each
+the backend. Claude Code runs its ordinary hooks asynchronously. Codex does not support
+async command hooks, so its handlers stay synchronous and network only on `Stop` and
+`SessionEnd`, under the inline budget below. Whether a given event drains at all is each
 dialect's own call, not a shared rule. One
 synthesized event, `workspace.observed`, supplements the native ones at whatever event
 `isSessionStart` names for that dialect: bounded, deterministic git metadata (branch,

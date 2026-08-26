@@ -3,12 +3,15 @@ name: trinity-connect
 description: Pair this Codex CLI installation with Trinity capture
 ---
 
-Run the pairing exchange, then confirm it actually landed — a Codex plugin skill's shell
-command has no direct access to this device's secured plugin storage, so success is never
-assumed from the first command's output alone.
+Connect this Codex installation with the short-lived pairing code the user provided.
 
-1. Run `node "${PLUGIN_ROOT}/dist/codex-connect.js" <pairing-code>` with the pairing code
-   the user gave you (from the Trinity dashboard's IDE integrations page).
-2. Run `node "${PLUGIN_ROOT}/dist/codex-connect.js" --status` as its own, separate shell
-   command to read back whether the pairing was confirmed.
-3. Report the status command's output to the user as-is. Do not take any further action.
+1. Run `codex plugin list --json` and find the `installedPath` for
+   `trinity-capture@trinity`. Stop with a clear error if it is not installed.
+2. Ask to run the next command outside the Codex sandbox. It needs network access to
+   exchange the code and writes the device credential under `~/.codex`; never print
+   the pairing code.
+3. Run `node "<installedPath>/dist/codex-connect.js" <pairing-code>`.
+4. Run `node "<installedPath>/dist/codex-connect.js" --status` as a separate command.
+   If it still says pending, wait one second and retry status up to five times while
+   the PostToolUse hook promotes the credential into the plugin data directory.
+5. Report the final status output as-is.

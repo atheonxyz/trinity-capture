@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { exchange } from "../src/connect.js";
 import { codexHome, pendingConfigPath, promotePendingConfig, writePendingConfig } from "../src/codex-connect.js";
-import { loadConfig } from "../src/config.js";
+import { loadConfig, savePolicy } from "../src/config.js";
 import type { DeviceConfig } from "../src/config.js";
 
 function tmpHome(): string {
@@ -20,6 +20,16 @@ function tmpPluginData(): string {
 
 function mode(path: string): number {
   return statSync(path).mode & 0o777;
+}
+
+function saveFreshPolicy(dataDir: string): void {
+  savePolicy(dataDir, {
+    etag: "policy-1",
+    fetchedAt: Date.now(),
+    ttlSeconds: 900,
+    captureLevel: "metadata",
+    workspaces: [{ canonicalRepo: "github.com/acme/widgets", aliases: [], route: "project:p1" }],
+  });
 }
 
 // A real local HTTP server standing in for the dashboard's exchange
@@ -72,10 +82,11 @@ test("the full connect flow: exchange against a stub server, write pending, prom
 
   writePendingConfig(home, exchanged);
   assert.ok(existsSync(pendingConfigPath(home)), "the pending record must exist before promotion");
+  saveFreshPolicy(pluginData);
 
   // A simulated PostToolUse hook: the exact function codex-hook.ts's own
   // PostToolUse handler calls, given the same (CODEX_HOME, PLUGIN_DATA) pair.
-  promotePendingConfig(home, pluginData, "https://api.example");
+  await promotePendingConfig(home, pluginData, "https://api.example");
 
   assert.ok(!existsSync(pendingConfigPath(home)), "promotion must remove the pending file");
   assert.ok(existsSync(join(home, "trinity-capture", "connected-device.json")), "promotion must write a confirmation marker");
@@ -87,7 +98,7 @@ test("the full connect flow: exchange against a stub server, write pending, prom
   assert.deepEqual(readBack, cfg, "read-back through config.ts's own loadConfig must succeed");
 });
 
-test("promotion rejects a pending config for an untrusted ingest origin", () => {
+test("promotion rejects a pending config for an untrusted ingest origin", async () => {
   const home = tmpHome();
   const pluginData = tmpPluginData();
   writePendingConfig(home, {
@@ -96,32 +107,62 @@ test("promotion rejects a pending config for an untrusted ingest origin", () => 
     deviceId: "forged-device",
   });
 
-  promotePendingConfig(home, pluginData);
+  await promotePendingConfig(home, pluginData);
 
   assert.ok(existsSync(pendingConfigPath(home)));
   assert.ok(!existsSync(join(pluginData, "config.json")));
 });
 
-test("promotePendingConfig is a no-op when nothing is pending", () => {
+test("promotion accepts the staging dashboard and API origin pair", async () => {
+  const home = tmpHome();
+  const pluginData = tmpPluginData();
+  const cfg: DeviceConfig = {
+    token: "staging-token",
+    ingestUrl: "https://api-staging.usetrinity.ai/api/v1/ingest/batches",
+    deviceId: "staging-device",
+  };
+  writePendingConfig(home, cfg);
+
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (url: string | URL) => {
+    if (!String(url).endsWith("/api/v1/ingest/policy")) throw new Error(`unexpected fetch: ${String(url)}`);
+    return Response.json({
+      etag: "staging-policy",
+      ttlSeconds: 900,
+      captureLevel: "metadata",
+      workspaces: [{ canonicalRepo: "github.com/acme/widgets", aliases: [], route: "project:p1" }],
+    });
+  }) as typeof fetch;
+  try {
+    await promotePendingConfig(home, pluginData, "https://staging.usetrinity.ai");
+  } finally {
+    globalThis.fetch = original;
+  }
+
+  assert.deepEqual(loadConfig(pluginData), cfg);
+  assert.ok(!existsSync(pendingConfigPath(home)));
+});
+
+test("promotePendingConfig is a no-op when nothing is pending", async () => {
   const home = tmpHome();
   const pluginData = tmpPluginData();
 
-  assert.doesNotThrow(() => promotePendingConfig(home, pluginData));
+  await assert.doesNotReject(promotePendingConfig(home, pluginData));
   assert.ok(!existsSync(join(pluginData, "config.json")));
 });
 
-test("promotePendingConfig leaves a malformed pending record in place for a later, complete write", () => {
+test("promotePendingConfig leaves a malformed pending record in place for a later, complete write", async () => {
   const home = tmpHome();
   const pluginData = tmpPluginData();
   writePendingConfig(home, { token: "", ingestUrl: "https://api.example/api/v1/ingest/batches", deviceId: "dev1" });
 
-  promotePendingConfig(home, pluginData);
+  await promotePendingConfig(home, pluginData);
 
   assert.ok(existsSync(pendingConfigPath(home)), "an incomplete DeviceConfig must not be promoted");
   assert.ok(!existsSync(join(pluginData, "config.json")));
 });
 
-test("an untrusted/disabled hook leaves the pending record for the next trusted invocation, which then promotes it", () => {
+test("an untrusted/disabled hook leaves the pending record for the next trusted invocation, which then promotes it", async () => {
   const home = tmpHome();
   const pluginData = tmpPluginData();
   const cfg: DeviceConfig = { token: "tok", ingestUrl: "https://api.example/api/v1/ingest/batches", deviceId: "dev1" };
@@ -134,16 +175,18 @@ test("an untrusted/disabled hook leaves the pending record for the next trusted 
   assert.equal(mode(pendingConfigPath(home)), 0o600);
 
   // The next trusted PostToolUse invocation promotes it.
-  promotePendingConfig(home, pluginData, "https://api.example");
+  saveFreshPolicy(pluginData);
+  await promotePendingConfig(home, pluginData, "https://api.example");
   assert.deepEqual(loadConfig(pluginData), cfg);
 });
 
-test("promotion never leaves the destination writable to group or other", () => {
+test("promotion never leaves the destination writable to group or other", async () => {
   const home = tmpHome();
   const pluginData = tmpPluginData();
   const cfg: DeviceConfig = { token: "tok", ingestUrl: "https://api.example/api/v1/ingest/batches", deviceId: "dev1" };
   writePendingConfig(home, cfg);
-  promotePendingConfig(home, pluginData, "https://api.example");
+  saveFreshPolicy(pluginData);
+  await promotePendingConfig(home, pluginData, "https://api.example");
 
   const configMode = mode(join(pluginData, "config.json"));
   assert.equal(configMode & 0o077, 0, `group/other must have no access: mode ${configMode.toString(8)}`);
