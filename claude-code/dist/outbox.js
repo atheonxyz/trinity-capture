@@ -42,7 +42,6 @@ function recordDrop(dataDir, drop) {
     catch (err) {
         if (!(err instanceof Error))
             throw err;
-        return;
     }
 }
 function enforceOutboxLimit(dataDir, dir) {
@@ -96,16 +95,12 @@ export function appendEvent(dataDir, ev) {
     }
     enforceOutboxLimit(dataDir, dir);
 }
-const openDrain = { inline: false, deadline: 0 };
-export async function drain(dataDir, cfg, options = openDrain) {
+export async function drain(dataDir, cfg, options = { inline: false, deadline: 0 }) {
     if (options.inline && Date.now() >= options.deadline)
         return;
     const dir = outboxDir(dataDir);
-    const files = readdirSync(dir)
-        .filter((f) => f.endsWith(".jsonl"))
-        .sort();
     const entries = [];
-    for (const file of files) {
+    for (const file of readdirSync(dir).filter((name) => name.endsWith(".jsonl")).sort()) {
         const path = join(dir, file);
         let raw;
         let mtimeMs;
@@ -162,7 +157,6 @@ export async function drain(dataDir, cfg, options = openDrain) {
         catch (err) {
             if (!(err instanceof Error))
                 throw err;
-            return;
         }
     }
 }

@@ -46,20 +46,20 @@ async function main(): Promise<void> {
   const baseUrl = process.env.TRINITY_BASE_URL ?? DEFAULT_BASE_URL;
   const code = process.argv[2]?.trim() ?? "";
   const existingConfig = loadConfig(dataDir);
-  const refreshingExistingDevice = code === "";
+  const hasPairingCode = code !== "";
 
   try {
     let cfg: DeviceConfig;
-    if (refreshingExistingDevice) {
+    if (hasPairingCode) {
+      cfg = await exchange(baseUrl, code);
+      saveConfig(dataDir, cfg);
+    } else {
       if (existingConfig === null) {
         console.error("No pairing code provided. Usage: /trinity:connect <pairing-code>");
         process.exitCode = 1;
         return;
       }
       cfg = existingConfig;
-    } else {
-      cfg = await exchange(baseUrl, code);
-      saveConfig(dataDir, cfg);
     }
     const policy = await refreshPolicy(dataDir, cfg);
     if (!isPolicyFresh(policy, Date.now())) {
@@ -67,7 +67,7 @@ async function main(): Promise<void> {
       process.exitCode = 1;
       return;
     }
-    console.log(refreshingExistingDevice ? "Trinity capture policy refreshed." : "Trinity connected. Exit Claude Code and start a new session in an enabled repository to begin capture.");
+    console.log(hasPairingCode ? "Trinity connected. Exit Claude Code and start a new session in an enabled repository to begin capture." : "Trinity capture policy refreshed.");
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err));
     process.exitCode = 1;

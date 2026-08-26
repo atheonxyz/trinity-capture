@@ -1,12 +1,8 @@
-// The single entry every Claude Code hook invokes, with the event name as
-// argv[2] and the hook JSON on stdin. Must never throw to the IDE: the CLI
-// bootstrap below always exits 0. Everything vendor-specific lives here as
-// one Dialect table; runHook (hook-core.ts) owns the shared engine.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { runHook } from "./hook-core.js";
-function str(payload, key) {
+function stringField(payload, key) {
     const value = payload[key];
     return typeof value === "string" && value !== "" ? value : null;
 }
@@ -32,9 +28,10 @@ function suppressedSessionFile(dataDir, sessionId) {
     return join(dataDir, "suppressed-sessions", `claude_code-${encodeURIComponent(sessionId)}`);
 }
 function suppressConnectSession(dataDir, event, payload) {
-    const sessionId = str(payload, "session_id") ?? "";
-    if (event === "UserPromptSubmit" && typeof payload.prompt === "string" && CONNECT_COMMAND.test(payload.prompt.trimStart())) {
-        if (sessionId !== "") {
+    const sessionId = stringField(payload, "session_id");
+    const prompt = stringField(payload, "prompt");
+    if (event === "UserPromptSubmit" && prompt !== null && CONNECT_COMMAND.test(prompt.trimStart())) {
+        if (sessionId !== null) {
             const file = suppressedSessionFile(dataDir, sessionId);
             try {
                 mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
@@ -47,7 +44,7 @@ function suppressConnectSession(dataDir, event, payload) {
         }
         return true;
     }
-    if (sessionId === "")
+    if (sessionId === null)
         return false;
     try {
         readFileSync(suppressedSessionFile(dataDir, sessionId));
@@ -61,9 +58,9 @@ function suppressConnectSession(dataDir, event, payload) {
 }
 export const claudeCodeDialect = {
     tool: "claude_code",
-    sessionId: (_event, payload) => str(payload, "session_id"),
-    cwd: (_event, payload) => str(payload, "cwd"),
-    vendorTurnId: (_event, payload) => str(payload, "prompt_id"),
+    sessionId: (_event, payload) => stringField(payload, "session_id"),
+    cwd: (_event, payload) => stringField(payload, "cwd"),
+    vendorTurnId: (_event, payload) => stringField(payload, "prompt_id"),
     isPromptSubmit: (event) => event === "UserPromptSubmit",
     isSessionStart: (event) => event === "SessionStart",
     // SessionEnd is the one hook hooks.json runs synchronously (no "async":

@@ -73,7 +73,6 @@ function recordDrop(dataDir: string, drop: Omit<DropRecord, "at">): void {
     writeFileSync(path, JSON.stringify({ drops: drops.slice(-MAX_DROP_RECORDS) }, null, 2));
   } catch (err) {
     if (!(err instanceof Error)) throw err;
-    return;
   }
 }
 
@@ -129,17 +128,16 @@ export interface DrainOptions {
   readonly deadline: number;
 }
 
-const openDrain: DrainOptions = { inline: false, deadline: 0 };
-
-export async function drain(dataDir: string, cfg: DeviceConfig, options: DrainOptions = openDrain): Promise<void> {
+export async function drain(
+  dataDir: string,
+  cfg: DeviceConfig,
+  options: DrainOptions = { inline: false, deadline: 0 },
+): Promise<void> {
   if (options.inline && Date.now() >= options.deadline) return;
   const dir = outboxDir(dataDir);
-  const files = readdirSync(dir)
-    .filter((f) => f.endsWith(".jsonl"))
-    .sort();
 
   const entries: OutboxEntry[] = [];
-  for (const file of files) {
+  for (const file of readdirSync(dir).filter((name) => name.endsWith(".jsonl")).sort()) {
     const path = join(dir, file);
     let raw: string;
     let mtimeMs: number;
@@ -189,7 +187,6 @@ export async function drain(dataDir: string, cfg: DeviceConfig, options: DrainOp
       await refreshPolicy(dataDir, cfg);
     } catch (err) {
       if (!(err instanceof Error)) throw err;
-      return;
     }
   }
 }
