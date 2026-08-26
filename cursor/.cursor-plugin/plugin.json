@@ -1,9 +1,16 @@
 {
   "name": "trinity-capture",
-  "description": "Captures Cursor CLI sessions into Trinity for allowlisted repositories.",
-  "version": "0.1.0",
+  "description": "Captures Cursor coding sessions into Trinity for allowlisted repositories.",
+  "version": "0.3.0",
   "author": {
-    "name": "Trinity"
+    "name": "Trinity",
+    "email": "hi@usetrinity.ai"
   },
-  "hooks": "hooks/hooks.json"
+  "homepage": "https://usetrinity.ai",
+  "repository": "https://github.com/atheonxyz/trinity-capture",
+  "license": "Apache-2.0",
+  "keywords": ["coding sessions", "developer tools", "team context"],
+  "logo": "assets/trinity.svg",
+  "hooks": "hooks/hooks.json",
+  "commands": "commands"
 }

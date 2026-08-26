@@ -15,6 +15,7 @@
     "src/observe.ts",
     "src/hook-core.ts",
     "src/cursor-hook.ts",
-    "src/cursor-connect.ts"
+    "src/cursor-connect.ts",
+    "src/device-authorization.ts"
   ]
 }
