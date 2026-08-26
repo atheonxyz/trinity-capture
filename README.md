@@ -31,6 +31,17 @@ Cursor waits for the browser approval, stores its credential in the operating sy
 
 ### Codex
 
+#### Codex App
+
+1. Open the [Plugins Directory](https://chatgpt.com/plugins), find Trinity Capture, and select **Install**.
+2. Start a new Codex task and approve the Trinity hooks when prompted.
+3. Generate a Codex pairing code from Trinity, then run `$trinity-connect <code>`.
+4. Start a new Codex task in an enabled repository.
+
+#### Codex CLI
+
+Until Trinity Capture is available in the public Plugins Directory:
+
 1. Run `codex plugin marketplace add https://github.com/atheonxyz/trinity-capture.git`.
 2. Run `codex plugin add trinity-capture@trinity`.
 3. Start Codex and approve the Trinity hooks when prompted.

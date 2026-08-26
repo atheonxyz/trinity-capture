@@ -160,6 +160,45 @@ test("the repo-root marketplace manifest names trinity-capture at the packaged c
   assert.ok(existsSync(join(sourceDir, "dist", "codex-hook.js")), "the marketplace entry points at a dir without the committed build");
 });
 
+test("the Codex package exposes public-directory metadata and assets", () => {
+  const packageManifest = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as {
+    readonly version: string;
+  };
+  const pluginManifest = JSON.parse(readFileSync(join(process.cwd(), "codex", ".codex-plugin", "plugin.json"), "utf8")) as {
+    readonly version: string;
+    readonly author: { readonly email?: string; readonly url?: string };
+    readonly homepage?: string;
+    readonly repository?: string;
+    readonly license?: string;
+    readonly interface?: {
+      readonly websiteURL?: string;
+      readonly privacyPolicyURL?: string;
+      readonly termsOfServiceURL?: string;
+      readonly defaultPrompt?: readonly string[];
+      readonly logo?: string;
+      readonly screenshots?: readonly string[];
+    };
+  };
+
+  assert.equal(pluginManifest.version, packageManifest.version);
+  assert.equal(pluginManifest.author.email, "hi@usetrinity.ai");
+  assert.equal(pluginManifest.author.url, "https://usetrinity.ai");
+  assert.equal(pluginManifest.homepage, "https://usetrinity.ai");
+  assert.equal(pluginManifest.repository, "https://github.com/atheonxyz/trinity-capture");
+  assert.equal(pluginManifest.license, "Apache-2.0");
+  assert.equal(pluginManifest.interface?.websiteURL, "https://usetrinity.ai");
+  assert.equal(pluginManifest.interface?.privacyPolicyURL, "https://usetrinity.ai/privacy");
+  assert.equal(pluginManifest.interface?.termsOfServiceURL, "https://usetrinity.ai/terms");
+  assert.ok(Array.isArray(pluginManifest.interface?.defaultPrompt));
+  assert.ok(pluginManifest.interface?.defaultPrompt?.length);
+  assert.ok(pluginManifest.interface?.logo);
+  assert.ok(existsSync(resolve(process.cwd(), "codex", pluginManifest.interface?.logo ?? "")));
+  assert.ok(pluginManifest.interface?.screenshots?.length);
+  for (const screenshot of pluginManifest.interface?.screenshots ?? []) {
+    assert.ok(existsSync(resolve(process.cwd(), "codex", screenshot)));
+  }
+});
+
 test("status before pairing reports that this installation is not paired", () => {
   const home = mkdtempSync(join(tmpdir(), "trinity-codex-unpaired-home-"));
   const output = execFileSync("node", [connectBin, "--status"], {
@@ -194,6 +233,7 @@ test("uninstall: hooks.json and the connect skill reference nothing outside the 
   const skillPath = join(process.cwd(), "codex", "skills", "trinity-connect", "SKILL.md");
   const skillRaw = readFileSync(skillPath, "utf8");
   assert.match(skillRaw, /codex plugin list --json/, "the connect skill must resolve its installed path through Codex");
-  assert.match(skillRaw, /trinity-capture@trinity/, "the connect skill must resolve the exact installed plugin");
+  assert.match(skillRaw, /`trinity-capture`/, "the connect skill must resolve the installed Trinity plugin by name");
+  assert.doesNotMatch(skillRaw, /trinity-capture@trinity/, "the connect skill must work from the public directory or a repo marketplace");
   assert.doesNotMatch(skillRaw, /\/Users\/|\/home\//, "the connect skill must not embed an absolute local path");
 });
