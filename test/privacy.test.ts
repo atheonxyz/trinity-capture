@@ -4,7 +4,8 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runHook } from "../src/claude-hook.js";
+import { claudeCodeDialect } from "../src/claude-hook.js";
+import { runHook } from "../src/hook-core.js";
 import { saveConfig, savePolicy } from "../src/config.js";
 
 function initRepo(remote: string): string {
@@ -40,7 +41,10 @@ test("an unmatched repository makes no policy request when the cache is stale", 
     return new Response(null, { status: 503 });
   }) as typeof fetch;
   try {
-    await runHook("SessionStart", { session_id: "s1", cwd: repo }, dataDir);
+    await runHook(claudeCodeDialect, "SessionStart", JSON.stringify({ session_id: "s1", cwd: repo }), {
+      ...process.env,
+      CLAUDE_PLUGIN_DATA: dataDir,
+    });
   } finally {
     globalThis.fetch = original;
   }

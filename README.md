@@ -6,6 +6,8 @@ plugin per coding product. Claude Code ships in Phase 1; Codex and Cursor are de
 
 ## Setup (Claude Code)
 
+Requires Node 20 or newer. Check with `node --version` before installing.
+
 1. Install the `trinity-capture` plugin with
    `/plugin marketplace add https://github.com/atheonxyz/trinity-capture.git` (the
    repository's `.claude-plugin/marketplace.json` names the plugin), then
@@ -28,13 +30,14 @@ local build at a non-production backend.
 ```
 trinity-capture/
 ├── src/
-│   ├── config.ts      DeviceConfig + Policy: load/save from CLAUDE_PLUGIN_DATA
-│   ├── gate.ts         routeFor(): the fail-closed allowlist check
-│   ├── outbox.ts        appendEvent()/drain(): local queue, batched send
-│   ├── send.ts          sendBatch()/refreshPolicy(): the wire calls
-│   ├── observe.ts       gitRemoteOf()/workspaceObserved(): local git metadata
-│   ├── claude-hook.ts    the plugin entry every Claude Code hook invokes
-│   └── connect.ts        the /trinity:connect command
+│   ├── config.ts       device credentials and capture policy
+│   ├── gate.ts         fail-closed repository allowlist
+│   ├── outbox.ts       durable local queue and bounded drain
+│   ├── send.ts         bounded policy and ingestion requests
+│   ├── observe.ts      local git metadata
+│   ├── hook-core.ts    shared gating, correlation, append, and drain engine
+│   ├── claude-hook.ts  Claude event mapping and payload allowlist
+│   └── connect.ts      pairing and policy refresh
 └── claude-code/
     ├── .claude-plugin/plugin.json
     ├── hooks/hooks.json     registers the five lifecycle hooks
@@ -48,20 +51,16 @@ regenerates it from `src/` (plain ESM, no bundler, no runtime dependencies) — 
 and commit the output whenever `src/` changes. `test/packaging.test.ts` executes the
 committed `claude-hook.js` directly, so a stale or missing dist fails the suite.
 
-Every hook invocation is a fresh, short-lived process — there is no daemon and nothing
-runs between hook events. `claude-hook.ts` reads the hook's stdin JSON, checks the gate,
-filters the payload to the capture level, appends it to the local outbox, and makes a
-bounded attempt to drain the outbox to the backend. One synthesized event,
-`workspace.observed`,
-supplements the native ones at `SessionStart`: bounded, deterministic git metadata
-(branch, HEAD SHA, dirty flag, diffstat, changed files) that the server can never read
-directly.
+Every hook invocation is a fresh, short-lived process. The Claude dialect maps native
+fields into `hook-core.ts`, which checks the local allowlist, appends before network I/O,
+and attempts a bounded drain. `SessionStart` also synthesizes `workspace.observed` with
+bounded git metadata the server cannot read itself.
 
-Turn identity is plugin-minted: every `UserPromptSubmit` mints a fresh uuid, persisted
-per session under the plugin data dir (`turnkeys/`), and every later event of that
-session carries it as the envelope's `turnKey` until the next prompt replaces it
-(`SessionStart` and `workspace.observed` carry none). The server treats it as an
-untrusted hint and falls back to open-turn-by-ordinal when it is absent.
+Turn keys are plugin-minted and stored in one write-once file per vendor turn id under
+`turnkeys/<tool>-<session>/`. Concurrent or out-of-order hook processes therefore resolve
+the same vendor turn to the same key without sharing a race-prone session map. Events
+without a vendor turn id use a separate `latest` fallback; session-start events carry no
+turn key. The server treats every key as an untrusted hint.
 
 ## Capture levels
 

@@ -1,8 +1,8 @@
-import type { CaptureEvent } from "./outbox.js";
 import type { DeviceConfig, Policy } from "./config.js";
 import { loadPolicy, savePolicy } from "./config.js";
+import type { CaptureEvent } from "./outbox.js";
 
-export const REQUEST_TIMEOUT_MS = 10_000;
+export const REQUEST_TIMEOUT_MS = 5_000;
 
 export interface ItemResult {
   captureEventId: string;
@@ -16,7 +16,11 @@ export class BatchRequestError extends Error {
   }
 }
 
-export async function sendBatch(cfg: DeviceConfig, events: CaptureEvent[]): Promise<ItemResult[]> {
+export async function sendBatch(
+  cfg: DeviceConfig,
+  events: CaptureEvent[],
+  timeoutMs = REQUEST_TIMEOUT_MS,
+): Promise<ItemResult[]> {
   const res = await fetch(cfg.ingestUrl, {
     method: "POST",
     headers: {
@@ -25,20 +29,24 @@ export async function sendBatch(cfg: DeviceConfig, events: CaptureEvent[]): Prom
       "X-Trinity-Wire-Version": "1",
     },
     body: JSON.stringify({ items: events }),
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw new BatchRequestError(res.status);
   const body = (await res.json()) as { results: ItemResult[] };
   return body.results;
 }
 
-export async function refreshPolicy(dataDir: string, cfg: DeviceConfig): Promise<Policy | null> {
+export async function refreshPolicy(
+  dataDir: string,
+  cfg: DeviceConfig,
+  timeoutMs = REQUEST_TIMEOUT_MS,
+): Promise<Policy | null> {
   const current = loadPolicy(dataDir);
   const policyUrl = cfg.ingestUrl.replace(/\/batches$/, "/policy");
   const headers: Record<string, string> = { Authorization: `Bearer ${cfg.token}` };
   if (current) headers["If-None-Match"] = current.etag;
 
-  const res = await fetch(policyUrl, { headers, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+  const res = await fetch(policyUrl, { headers, signal: AbortSignal.timeout(timeoutMs) });
   if (res.status === 304 && current) {
     const refreshed: Policy = { ...current, fetchedAt: Date.now() };
     savePolicy(dataDir, refreshed);

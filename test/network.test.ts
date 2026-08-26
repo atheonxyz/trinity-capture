@@ -4,11 +4,12 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { exchange } from "../src/connect.js";
-import { refreshPolicy, sendBatch } from "../src/send.js";
+import { refreshPolicy, REQUEST_TIMEOUT_MS, sendBatch } from "../src/send.js";
 import type { CaptureEvent } from "../src/outbox.js";
 import type { DeviceConfig } from "../src/config.js";
 
 test("plugin HTTP requests carry a bounded abort signal", async () => {
+  assert.equal(REQUEST_TIMEOUT_MS, 5_000);
   const dataDir = mkdtempSync(join(tmpdir(), "trinity-network-data-"));
   const cfg: DeviceConfig = { token: "tok", ingestUrl: "https://ingest.example/api/v1/ingest/batches", deviceId: "dev1" };
   const event: CaptureEvent = {

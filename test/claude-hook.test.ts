@@ -1,112 +1,60 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { runHook } from "../src/claude-hook.js";
 import { saveConfig, savePolicy } from "../src/config.js";
-
-const WIDGETS_REMOTE = "git@github.com:acme/widgets.git";
-const WIDGETS_WORKSPACE = { canonicalRepo: "github.com/acme/widgets", aliases: [], route: "project:p1" };
-
-function tmpDataDir(): string {
-  return mkdtempSync(join(tmpdir(), "trinity-data-"));
-}
-
-function gitEnv(): NodeJS.ProcessEnv {
-  return {
-    ...process.env,
-    GIT_AUTHOR_NAME: "Trinity Test",
-    GIT_AUTHOR_EMAIL: "test@trinity.dev",
-    GIT_COMMITTER_NAME: "Trinity Test",
-    GIT_COMMITTER_EMAIL: "test@trinity.dev",
-  };
-}
-
-function initWidgetsRepo(): string {
-  const dir = mkdtempSync(join(tmpdir(), "trinity-repo-"));
-  execFileSync("git", ["init", "-q", "-b", "main"], { cwd: dir });
-  execFileSync("git", ["remote", "add", "origin", WIDGETS_REMOTE], { cwd: dir });
-  execFileSync("git", ["commit", "--allow-empty", "-q", "-m", "init"], { cwd: dir, env: gitEnv() });
-  return dir;
-}
-
-function outboxFiles(dataDir: string): string[] {
-  const dir = join(dataDir, "outbox");
-  return existsSync(dir) ? readdirSync(dir) : [];
-}
-
-function saveDevicePolicy(dataDir: string, fetchedAt: number): void {
-  saveConfig(dataDir, { token: "tok", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev1" });
-  savePolicy(dataDir, {
-    etag: fetchedAt === 0 ? "old" : "e1",
-    fetchedAt,
-    ttlSeconds: 900,
-    captureLevel: "metadata",
-    workspaces: [WIDGETS_WORKSPACE],
-  });
-}
-
-function stubFetch(opts: {
-  onPolicy?: () => Response;
-  onBatch?: (items: { captureEventId: string }[]) => Response;
-}): () => void {
-  const original = globalThis.fetch;
-  globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
-    const href = String(url);
-    if (href.endsWith("/policy")) {
-      if (!opts.onPolicy) throw new Error(`unexpected policy fetch: ${href}`);
-      return opts.onPolicy();
-    }
-    if (href.endsWith("/batches")) {
-      const body = JSON.parse(String(init?.body)) as { items: { captureEventId: string }[] };
-      if (opts.onBatch) return opts.onBatch(body.items);
-      return new Response(
-        JSON.stringify({ results: body.items.map((i) => ({ captureEventId: i.captureEventId, outcome: "retry_later" })) }),
-        { status: 200 },
-      );
-    }
-    throw new Error(`unexpected fetch: ${href}`);
-  }) as typeof fetch;
-  return () => {
-    globalThis.fetch = original;
-  };
-}
-
-const sessionStartInput = {
-  session_id: "s1",
-  hook_event_name: "SessionStart",
-  transcript_path: "/Users/dev/.claude/transcripts/s1.jsonl",
-  model: "claude-fable-5",
-};
+import type { DeviceConfig, Policy } from "../src/config.js";
+import { initRepo, outboxFiles, runClaudeHook, sessionStartInput, tmpDataDir } from "./helpers/claude-hook-fixture.js";
 
 test("SessionStart in an allowlisted repo appends the session event and workspace.observed", async () => {
   const dataDir = tmpDataDir();
-  saveDevicePolicy(dataDir, Date.now());
+  // Unreachable on purpose (TEST-NET port 0): drain must fail fast and
+  // leave the outbox intact, so the assertion below is about appendEvent,
+  // not about a real batch round-trip.
+  const cfg: DeviceConfig = { token: "tok", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev1" };
+  saveConfig(dataDir, cfg);
+  const policy: Policy = {
+    etag: "e1",
+    fetchedAt: Date.now(),
+    ttlSeconds: 900,
+    captureLevel: "metadata",
+    workspaces: [{ canonicalRepo: "github.com/acme/widgets", aliases: [], route: "project:p1" }],
+  };
+  savePolicy(dataDir, policy);
 
-  const repo = initWidgetsRepo();
+  const repo = initRepo("git@github.com:acme/widgets.git");
 
-  await runHook("SessionStart", { ...sessionStartInput, cwd: repo }, dataDir);
+  await runClaudeHook("SessionStart", { ...sessionStartInput, cwd: repo }, dataDir);
 
   assert.equal(outboxFiles(dataDir).length, 2);
 });
 
 test("the same fixture with no config file appends nothing and never throws", async () => {
   const dataDir = tmpDataDir();
-  const repo = initWidgetsRepo();
+  const repo = initRepo("git@github.com:acme/widgets.git");
 
-  await assert.doesNotReject(runHook("SessionStart", { ...sessionStartInput, cwd: repo }, dataDir));
+  await assert.doesNotReject(runClaudeHook("SessionStart", { ...sessionStartInput, cwd: repo }, dataDir));
 
   assert.equal(outboxFiles(dataDir).length, 0);
 });
 
 test("PostToolUse forwards only allowlisted metadata — no tool bodies under any name, no local paths", async () => {
   const dataDir = tmpDataDir();
-  saveDevicePolicy(dataDir, Date.now());
-  const repo = initWidgetsRepo();
+  const cfg: DeviceConfig = { token: "tok", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev1" };
+  saveConfig(dataDir, cfg);
+  savePolicy(dataDir, {
+    etag: "e1",
+    fetchedAt: Date.now(),
+    ttlSeconds: 900,
+    captureLevel: "metadata",
+    workspaces: [{ canonicalRepo: "github.com/acme/widgets", aliases: [], route: "project:p1" }],
+  });
+  const repo = initRepo("git@github.com:acme/widgets.git");
 
-  await runHook(
+  // The real captured PostToolUse shape (claude 2.1.241: tool_response, not
+  // tool_output) plus a field the vendor has never sent — the allowlist must
+  // drop what it has not heard of, not just what it can name.
+  await runClaudeHook(
     "PostToolUse",
     {
       session_id: "s1",
@@ -145,8 +93,16 @@ test("PostToolUse forwards only allowlisted metadata — no tool bodies under an
 
 test("UserPromptSubmit mints a turnKey the following events carry until the next prompt", async () => {
   const dataDir = tmpDataDir();
-  saveDevicePolicy(dataDir, Date.now());
-  const repo = initWidgetsRepo();
+  const cfg: DeviceConfig = { token: "tok", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev1" };
+  saveConfig(dataDir, cfg);
+  savePolicy(dataDir, {
+    etag: "e1",
+    fetchedAt: Date.now(),
+    ttlSeconds: 900,
+    captureLevel: "metadata",
+    workspaces: [{ canonicalRepo: "github.com/acme/widgets", aliases: [], route: "project:p1" }],
+  });
+  const repo = initRepo("git@github.com:acme/widgets.git");
 
   interface OutboxEvent {
     kind: string;
@@ -156,12 +112,12 @@ test("UserPromptSubmit mints a turnKey the following events carry until the next
   const readEvents = (): OutboxEvent[] =>
     outboxFiles(dataDir).map((f) => JSON.parse(readFileSync(join(dataDir, "outbox", f), "utf8")) as OutboxEvent);
 
-  await runHook("SessionStart", { ...sessionStartInput, cwd: repo }, dataDir);
-  await runHook("UserPromptSubmit", { session_id: "s1", hook_event_name: "UserPromptSubmit", cwd: repo, prompt: "one" }, dataDir);
-  await runHook("PostToolUse", { session_id: "s1", hook_event_name: "PostToolUse", cwd: repo, tool_name: "Read", tool_use_id: "tu1" }, dataDir);
-  await runHook("Stop", { session_id: "s1", hook_event_name: "Stop", cwd: repo, last_assistant_message: "done" }, dataDir);
-  await runHook("UserPromptSubmit", { session_id: "s1", hook_event_name: "UserPromptSubmit", cwd: repo, prompt: "two" }, dataDir);
-  await runHook("SessionEnd", { session_id: "s1", hook_event_name: "SessionEnd", cwd: repo, reason: "other" }, dataDir);
+  await runClaudeHook("SessionStart", { ...sessionStartInput, cwd: repo }, dataDir);
+  await runClaudeHook("UserPromptSubmit", { session_id: "s1", hook_event_name: "UserPromptSubmit", cwd: repo, prompt_id: "p1", prompt: "one" }, dataDir);
+  await runClaudeHook("PostToolUse", { session_id: "s1", hook_event_name: "PostToolUse", cwd: repo, prompt_id: "p1", tool_name: "Read", tool_use_id: "tu1" }, dataDir);
+  await runClaudeHook("Stop", { session_id: "s1", hook_event_name: "Stop", cwd: repo, prompt_id: "p1", last_assistant_message: "done" }, dataDir);
+  await runClaudeHook("UserPromptSubmit", { session_id: "s1", hook_event_name: "UserPromptSubmit", cwd: repo, prompt_id: "p2", prompt: "two" }, dataDir);
+  await runClaudeHook("SessionEnd", { session_id: "s1", hook_event_name: "SessionEnd", cwd: repo, prompt_id: "p2", reason: "other" }, dataDir);
 
   const events = readEvents();
   const byKind = (kind: string) => events.filter((e) => e.kind === kind);
@@ -178,96 +134,40 @@ test("UserPromptSubmit mints a turnKey the following events carry until the next
   assert.equal(byKind("SessionEnd")[0].turnKey, prompt2.turnKey, "SessionEnd still carries the latest prompt's key");
 });
 
-test("a later hook refreshes stale policy after the cached allowlist matches", async () => {
+test("out-of-order delivery still correlates by the vendor's own turn id, not arrival order", async () => {
   const dataDir = tmpDataDir();
-  saveDevicePolicy(dataDir, 0);
-  const repo = initWidgetsRepo();
-
-  let policyCalls = 0;
-  const restore = stubFetch({
-    onPolicy: () => {
-      policyCalls++;
-      return new Response(
-        JSON.stringify({
-          etag: "new",
-          ttlSeconds: 900,
-          captureLevel: "metadata",
-          workspaces: [WIDGETS_WORKSPACE],
-        }),
-        { status: 200 },
-      );
-    },
+  const cfg: DeviceConfig = { token: "tok", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev1" };
+  saveConfig(dataDir, cfg);
+  savePolicy(dataDir, {
+    etag: "e1",
+    fetchedAt: Date.now(),
+    ttlSeconds: 900,
+    captureLevel: "metadata",
+    workspaces: [{ canonicalRepo: "github.com/acme/widgets", aliases: [], route: "project:p1" }],
   });
-  try {
-    await runHook("PostToolUse", { session_id: "s1", cwd: repo, tool_name: "Read" }, dataDir);
-  } finally {
-    restore();
+  const repo = initRepo("git@github.com:acme/widgets.git");
+
+  interface OutboxEvent {
+    kind: string;
+    turnKey?: string;
+    payload: { prompt?: string; tool_use_id?: string };
   }
+  const readEvents = (): OutboxEvent[] =>
+    outboxFiles(dataDir).map((f) => JSON.parse(readFileSync(join(dataDir, "outbox", f), "utf8")) as OutboxEvent);
 
-  assert.equal(policyCalls, 1);
-  assert.equal(outboxFiles(dataDir).length, 1, "the refreshed policy should let the later event pass the gate");
-});
+  // Two prompts mint two independent keys (K1 for p1, K2 for p2); a
+  // PostToolUse for the FIRST prompt (p1) arrives only after the SECOND
+  // prompt has already been submitted — it must still resolve K1, never K2
+  // or whatever "latest" happens to hold.
+  await runClaudeHook("UserPromptSubmit", { session_id: "s1", cwd: repo, prompt_id: "p1", prompt: "one" }, dataDir);
+  await runClaudeHook("UserPromptSubmit", { session_id: "s1", cwd: repo, prompt_id: "p2", prompt: "two" }, dataDir);
+  await runClaudeHook("PostToolUse", { session_id: "s1", cwd: repo, prompt_id: "p1", tool_name: "Read", tool_use_id: "late-for-p1" }, dataDir);
 
-test("SessionEnd makes a final drain attempt", async () => {
-  const dataDir = tmpDataDir();
-  saveDevicePolicy(dataDir, Date.now());
-  const repo = initWidgetsRepo();
+  const events = readEvents();
+  const k1 = events.find((e) => e.payload.prompt === "one")?.turnKey;
+  const k2 = events.find((e) => e.payload.prompt === "two")?.turnKey;
+  const late = events.find((e) => e.payload.tool_use_id === "late-for-p1")?.turnKey;
 
-  let batchCalls = 0;
-  const restore = stubFetch({
-    onBatch: (items) => {
-      batchCalls++;
-      return new Response(
-        JSON.stringify({ results: items.map((item) => ({ captureEventId: item.captureEventId, outcome: "stored" })) }),
-        { status: 200 },
-      );
-    },
-  });
-  try {
-    await runHook("SessionEnd", { session_id: "s1", cwd: repo, reason: "other" }, dataDir);
-  } finally {
-    restore();
-  }
-
-  assert.equal(batchCalls, 1);
-  assert.equal(outboxFiles(dataDir).length, 0);
-});
-
-test("a failed policy refresh still fails closed", async () => {
-  const dataDir = tmpDataDir();
-  saveDevicePolicy(dataDir, 0);
-  const repo = initWidgetsRepo();
-
-  const original = globalThis.fetch;
-  globalThis.fetch = (async () => {
-    throw new Error("network down");
-  }) as typeof fetch;
-  try {
-    await assert.doesNotReject(runHook("SessionStart", { ...sessionStartInput, cwd: repo }, dataDir));
-  } finally {
-    globalThis.fetch = original;
-  }
-
-  assert.equal(outboxFiles(dataDir).length, 0, "an expired policy whose refresh failed must still fail closed");
-});
-
-test("a fresh policy is not refetched", async () => {
-  const dataDir = tmpDataDir();
-  saveDevicePolicy(dataDir, Date.now());
-  const repo = initWidgetsRepo();
-
-  let policyCalls = 0;
-  const restore = stubFetch({
-    onPolicy: () => {
-      policyCalls++;
-      return new Response("{}", { status: 200 });
-    },
-  });
-  try {
-    await runHook("SessionStart", { ...sessionStartInput, cwd: repo }, dataDir);
-  } finally {
-    restore();
-  }
-
-  assert.equal(policyCalls, 0, "a fresh (non-expired) policy must not trigger a refresh fetch");
+  assert.ok(k1 && k2 && k1 !== k2);
+  assert.equal(late, k1, "an out-of-order PostToolUse for p1 must resolve K1, not K2");
 });

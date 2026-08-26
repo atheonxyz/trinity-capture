@@ -101,7 +101,7 @@ test("pairs a device, replays a session, and reads it back through the dashboard
     const ev: CaptureEvent = { ...raw, captureEventId: randomUUID(), externalSessionId };
     appendEvent(dataDir, ev);
   }
-  await drain(dataDir, cfg);
+  await drain(dataDir, cfg, { inline: false, deadline: 0 });
 
   // 5. Poll the dashboard API — real person-session bearer, not the device token.
   let session: SessionDTO | undefined;
