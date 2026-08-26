@@ -36,7 +36,7 @@ local build at a non-production backend.
    below it. Confirm with `node --version` before installing.
 1. Install the `trinity-capture` plugin from this repository's `codex/` directory
    (its own manifest is `codex/.codex-plugin/plugin.json`; the repo root's
-   `.codex-plugin/marketplace.json` names it for a marketplace-style add where Codex's
+   `.agents/plugins/marketplace.json` names it for a marketplace-style add where Codex's
    plugin tooling supports one — see your Codex CLI's own plugin docs for the exact
    install command, since this is an internal/sideload distribution, not a public
    marketplace listing).

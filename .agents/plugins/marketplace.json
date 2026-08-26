@@ -1,0 +1,20 @@
+{
+  "name": "trinity",
+  "interface": {
+    "displayName": "Trinity"
+  },
+  "plugins": [
+    {
+      "name": "trinity-capture",
+      "source": {
+        "source": "local",
+        "path": "./codex"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

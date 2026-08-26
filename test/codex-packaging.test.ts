@@ -117,28 +117,37 @@ test("committed binary, PostToolUse: promotes a pending device config into PLUGI
 });
 
 test("the repo-root marketplace manifest names trinity-capture at the packaged codex plugin dir", () => {
-  const manifestPath = join(process.cwd(), ".codex-plugin", "marketplace.json");
+  const manifestPath = join(process.cwd(), ".agents", "plugins", "marketplace.json");
   assert.ok(existsSync(manifestPath), `${manifestPath} is missing — the plugin is not installable without it`);
 
   interface MarketplaceManifest {
     name: string;
-    plugins: { name: string; source: string; version: string }[];
+    plugins: {
+      name: string;
+      source: { source: string; path: string };
+      policy: { installation: string; authentication: string };
+      category: string;
+    }[];
   }
   const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as MarketplaceManifest;
   const entry = manifest.plugins.find((p) => p.name === "trinity-capture");
   assert.ok(entry, "marketplace.json lists no trinity-capture plugin");
 
-  const sourceDir = resolve(process.cwd(), entry.source);
-  assert.equal(sourceDir, resolve(process.cwd(), "codex"), `entry source ${entry.source} does not resolve to codex`);
+  assert.deepEqual(entry.policy, { installation: "AVAILABLE", authentication: "ON_INSTALL" });
+  assert.equal(entry.category, "Productivity");
+
+  const sourceDir = resolve(process.cwd(), entry.source.path);
+  assert.equal(entry.source.source, "local");
+  assert.equal(sourceDir, resolve(process.cwd(), "codex"), `entry source ${entry.source.path} does not resolve to codex`);
 
   const plugin = JSON.parse(readFileSync(join(sourceDir, ".codex-plugin", "plugin.json"), "utf8")) as {
     name: string;
-    version: string;
     skills?: string;
+    interface?: { displayName?: string };
   };
   assert.equal(plugin.name, entry.name);
-  assert.equal(plugin.version, entry.version, "marketplace entry and plugin.json disagree on the version");
   assert.equal(plugin.skills, "./skills/", "plugin.json must expose the packaged connect skill");
+  assert.equal(plugin.interface?.displayName, "Trinity Capture");
   assert.ok(existsSync(join(sourceDir, "dist", "codex-hook.js")), "the marketplace entry points at a dir without the committed build");
 });
 

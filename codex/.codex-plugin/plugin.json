@@ -5,5 +5,14 @@
   "skills": "./skills/",
   "author": {
     "name": "Trinity"
+  },
+  "interface": {
+    "displayName": "Trinity Capture",
+    "shortDescription": "Capture Codex sessions in Trinity.",
+    "longDescription": "Captures Codex CLI sessions for repositories enabled in Trinity.",
+    "developerName": "Trinity",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": "Connect this Codex installation to Trinity."
   }
 }
