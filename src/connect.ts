@@ -4,7 +4,7 @@ import type { DeviceConfig } from "./config.js";
 import { isPolicyFresh } from "./gate.js";
 import { refreshPolicy, REQUEST_TIMEOUT_MS } from "./send.js";
 
-const DEFAULT_BASE_URL = "https://api.usetrinity.ai";
+export const DEFAULT_BASE_URL = "https://api.usetrinity.ai";
 const MIN_NODE_MAJOR = 20;
 
 export function supportsNodeVersion(version: string): boolean {

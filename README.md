@@ -126,10 +126,9 @@ extraction, its payload allowlist, its data directory, and two predicates —
 `isSessionStart`, `drainsOn` — over its own event vocabulary) that `hook-core.ts`'s
 `runHook()` drives: it checks the gate, filters the payload to the capture level, appends
 it to the local outbox, and, only when `drainsOn(event)` says so, drains the outbox to
-the backend. Claude Code's `drainsOn` skips `SessionEnd`, the one hook its own
-`hooks.json` runs synchronously, to respect its tight timeout budget; Codex documents
-every hook as async-capable, so `codexDialect.drainsOn` returns true unconditionally —
-whether a given event drains at all is each dialect's own call, not a shared rule. One
+the backend. Claude Code and Codex both skip `SessionEnd`, which their hosts run
+synchronously with a tight timeout; whether a given event drains at all is each
+dialect's own call, not a shared rule. One
 synthesized event, `workspace.observed`, supplements the native ones at whatever event
 `isSessionStart` names for that dialect: bounded, deterministic git metadata (branch,
 HEAD SHA, dirty flag, diffstat, changed files) that the server can never read directly.
@@ -150,8 +149,7 @@ open-turn-by-ordinal when it is absent.
 
 Every fetch — batch sends, policy refreshes, `/trinity-connect`'s exchange — carries a
 5 second `AbortSignal.timeout`, so a hanging server can never stall a hook indefinitely.
-An async-capable product (Claude Code: 4 of its 5 hooks run detached; Codex: every hook
-documents async support) sets `drainInline: false` and keeps the open, multi-batch drain
+An async-capable hook sets `drainInline: false` and keeps the open, multi-batch drain
 above. A dialect whose hooks run synchronously instead (`drainInline: true`) drains at
 most one batch per call, bounded by a 2 second wall-clock budget taken at hook entry —
 each fetch it starts is aborted at whatever remains of that budget, and the send is

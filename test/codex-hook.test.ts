@@ -219,3 +219,17 @@ test("SessionEnd forwards the session's end reason", async () => {
   assert.equal(events.length, 1);
   assert.equal(events[0].payload.reason, "other");
 });
+
+test("the connect command suppresses the rest of its Codex session", async () => {
+  const dataDir = tmpDataDir();
+  saveConfig(dataDir, { token: "tok", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev1" });
+  savePolicy(dataDir, freshPolicy("github.com/acme/widgets"));
+  const repo = initRepo("git@github.com:acme/widgets.git");
+  const session = "connect-session";
+
+  await runCodexHook({ hook_event_name: "UserPromptSubmit", session_id: session, turn_id: "t1", prompt: "/trinity-connect ABCD", cwd: repo }, dataDir);
+  await runCodexHook({ hook_event_name: "Stop", session_id: session, turn_id: "t1", last_assistant_message: "connected", cwd: repo }, dataDir);
+  await runCodexHook({ hook_event_name: "SessionEnd", session_id: session, reason: "other", cwd: repo }, dataDir);
+
+  assert.deepEqual(outboxFiles(dataDir), []);
+});

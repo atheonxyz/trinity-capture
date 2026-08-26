@@ -107,7 +107,7 @@ test("committed binary, PostToolUse: promotes a pending device config into PLUGI
   stdin.cwd = repo;
   execFileSync("node", [hookBin, "PostToolUse"], {
     input: JSON.stringify(stdin),
-    env: { ...process.env, PLUGIN_DATA: dataDir, CODEX_HOME: codexHome },
+    env: { ...process.env, PLUGIN_DATA: dataDir, CODEX_HOME: codexHome, TRINITY_BASE_URL: "http://127.0.0.1:1" },
   });
 
   assert.ok(!existsSync(pending), "the committed PostToolUse hook must promote and remove the pending file");
@@ -134,10 +134,21 @@ test("the repo-root marketplace manifest names trinity-capture at the packaged c
   const plugin = JSON.parse(readFileSync(join(sourceDir, ".codex-plugin", "plugin.json"), "utf8")) as {
     name: string;
     version: string;
+    skills?: string;
   };
   assert.equal(plugin.name, entry.name);
   assert.equal(plugin.version, entry.version, "marketplace entry and plugin.json disagree on the version");
+  assert.equal(plugin.skills, "./skills/", "plugin.json must expose the packaged connect skill");
   assert.ok(existsSync(join(sourceDir, "dist", "codex-hook.js")), "the marketplace entry points at a dir without the committed build");
+});
+
+test("status before pairing reports that this installation is not paired", () => {
+  const home = mkdtempSync(join(tmpdir(), "trinity-codex-unpaired-home-"));
+  const output = execFileSync("node", [connectBin, "--status"], {
+    encoding: "utf8",
+    env: { ...process.env, CODEX_HOME: home },
+  });
+  assert.match(output, /not paired/i);
 });
 
 test("uninstall: hooks.json and the connect skill reference nothing outside the plugin dir — removing codex/ leaves no dangling refs", () => {

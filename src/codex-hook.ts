@@ -2,15 +2,48 @@
 // and the hook JSON on stdin. Must never throw to the IDE: the CLI bootstrap
 // below always exits 0. Everything vendor-specific lives here as one Dialect
 // table; runHook (hook-core.ts) owns the shared engine.
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Dialect } from "./hook-core.js";
 import { runHook } from "./hook-core.js";
+import { DEFAULT_BASE_URL } from "./connect.js";
 import { codexHome, promotePendingConfig } from "./codex-connect.js";
 
 function str(payload: Record<string, unknown>, key: string): string | null {
   const value = payload[key];
   return typeof value === "string" && value !== "" ? value : null;
+}
+
+const CONNECT_COMMAND = /^(?:\/|\$)trinity-connect(?:\s|$)/;
+
+function suppressedSessionFile(dataDir: string, sessionId: string): string {
+  return join(dataDir, "suppressed-sessions", `codex-${encodeURIComponent(sessionId)}`);
+}
+
+function suppressConnectSession(dataDir: string, event: string, payload: Record<string, unknown>): boolean {
+  const sessionId = str(payload, "session_id");
+  const prompt = str(payload, "prompt");
+  if (event === "UserPromptSubmit" && prompt !== null && CONNECT_COMMAND.test(prompt.trimStart())) {
+    if (sessionId !== null) {
+      const file = suppressedSessionFile(dataDir, sessionId);
+      try {
+        mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+        writeFileSync(file, "", { mode: 0o600 });
+      } catch (error) {
+        if (!(error instanceof Error)) throw error;
+      }
+    }
+    return true;
+  }
+  if (sessionId === null) return false;
+  try {
+    readFileSync(suppressedSessionFile(dataDir, sessionId));
+    return true;
+  } catch (error) {
+    if (error instanceof Error) return false;
+    throw error;
+  }
 }
 
 // What leaves the machine is an ALLOWLIST, never a strip list (see
@@ -45,7 +78,8 @@ export const codexDialect: Dialect = {
   // Unlike Claude's captured hooks.json, nothing in the capture singles out
   // one Codex event as synchronous, so every event may attempt the open
   // multi-batch drain below.
-  drainsOn: () => true,
+  drainsOn: (event) => event !== "SessionEnd",
+  suppress: suppressConnectSession,
   allow: (event) => [...ALLOW_EVERY_EVENT, ...(ALLOW_PER_EVENT[event] ?? [])],
   // Async-capable, like claude_code's: the open multi-batch drain in
   // hook-core is fine (contrast Cursor's drainInline: true).
@@ -69,10 +103,11 @@ async function cli(): Promise<void> {
   if (eventName === "PostToolUse") {
     try {
       const dataDir = codexDialect.dataDir(process.env);
-      if (dataDir) promotePendingConfig(codexHome(process.env), dataDir);
-    } catch {
-      // malformed pending file, unwritable PLUGIN_DATA, etc. — leave the
-      // pending record for the next PostToolUse to retry
+      if (dataDir) {
+        promotePendingConfig(codexHome(process.env), dataDir, process.env.TRINITY_BASE_URL ?? DEFAULT_BASE_URL);
+      }
+    } catch (error) {
+      if (!(error instanceof Error)) throw error;
     }
   }
 

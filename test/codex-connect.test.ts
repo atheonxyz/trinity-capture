@@ -51,7 +51,7 @@ test("codexHome resolves CODEX_HOME, defaulting under the user's home directory"
 
 test("writePendingConfig writes a mode-0600 file under a mode-0700 directory, atomically", () => {
   const home = tmpHome();
-  const cfg: DeviceConfig = { token: "tok", ingestUrl: "https://api.example/ingest/batches", deviceId: "dev1" };
+  const cfg: DeviceConfig = { token: "tok", ingestUrl: "https://api.example/api/v1/ingest/batches", deviceId: "dev1" };
 
   writePendingConfig(home, cfg);
 
@@ -65,7 +65,7 @@ test("writePendingConfig writes a mode-0600 file under a mode-0700 directory, at
 test("the full connect flow: exchange against a stub server, write pending, promote, read back", async () => {
   const home = tmpHome();
   const pluginData = tmpPluginData();
-  const cfg: DeviceConfig = { token: "tok-e2e", ingestUrl: "https://api.example/ingest/batches", deviceId: "dev-e2e" };
+  const cfg: DeviceConfig = { token: "tok-e2e", ingestUrl: "https://api.example/api/v1/ingest/batches", deviceId: "dev-e2e" };
 
   const exchanged = await withStubServer(cfg, (baseUrl) => exchange(baseUrl, "PAIR-CODE"));
   assert.deepEqual(exchanged, cfg);
@@ -75,15 +75,31 @@ test("the full connect flow: exchange against a stub server, write pending, prom
 
   // A simulated PostToolUse hook: the exact function codex-hook.ts's own
   // PostToolUse handler calls, given the same (CODEX_HOME, PLUGIN_DATA) pair.
-  promotePendingConfig(home, pluginData);
+  promotePendingConfig(home, pluginData, "https://api.example");
 
   assert.ok(!existsSync(pendingConfigPath(home)), "promotion must remove the pending file");
+  assert.ok(existsSync(join(home, "trinity-capture", "connected-device.json")), "promotion must write a confirmation marker");
   const configPath = join(pluginData, "config.json");
   assert.ok(existsSync(configPath), "promotion must write PLUGIN_DATA/config.json");
   assert.equal(mode(configPath), 0o600, "the promoted credential file must be mode 0600");
 
   const readBack = loadConfig(pluginData);
   assert.deepEqual(readBack, cfg, "read-back through config.ts's own loadConfig must succeed");
+});
+
+test("promotion rejects a pending config for an untrusted ingest origin", () => {
+  const home = tmpHome();
+  const pluginData = tmpPluginData();
+  writePendingConfig(home, {
+    token: "forged",
+    ingestUrl: "https://attacker.example/api/v1/ingest/batches",
+    deviceId: "forged-device",
+  });
+
+  promotePendingConfig(home, pluginData);
+
+  assert.ok(existsSync(pendingConfigPath(home)));
+  assert.ok(!existsSync(join(pluginData, "config.json")));
 });
 
 test("promotePendingConfig is a no-op when nothing is pending", () => {
@@ -97,7 +113,7 @@ test("promotePendingConfig is a no-op when nothing is pending", () => {
 test("promotePendingConfig leaves a malformed pending record in place for a later, complete write", () => {
   const home = tmpHome();
   const pluginData = tmpPluginData();
-  writePendingConfig(home, { token: "", ingestUrl: "https://api.example/ingest/batches", deviceId: "dev1" } as DeviceConfig);
+  writePendingConfig(home, { token: "", ingestUrl: "https://api.example/api/v1/ingest/batches", deviceId: "dev1" });
 
   promotePendingConfig(home, pluginData);
 
@@ -108,7 +124,7 @@ test("promotePendingConfig leaves a malformed pending record in place for a late
 test("an untrusted/disabled hook leaves the pending record for the next trusted invocation, which then promotes it", () => {
   const home = tmpHome();
   const pluginData = tmpPluginData();
-  const cfg: DeviceConfig = { token: "tok", ingestUrl: "https://api.example/ingest/batches", deviceId: "dev1" };
+  const cfg: DeviceConfig = { token: "tok", ingestUrl: "https://api.example/api/v1/ingest/batches", deviceId: "dev1" };
   writePendingConfig(home, cfg);
 
   // First "invocation" simulates a hook that never ran (untrusted/disabled):
@@ -118,16 +134,16 @@ test("an untrusted/disabled hook leaves the pending record for the next trusted 
   assert.equal(mode(pendingConfigPath(home)), 0o600);
 
   // The next trusted PostToolUse invocation promotes it.
-  promotePendingConfig(home, pluginData);
+  promotePendingConfig(home, pluginData, "https://api.example");
   assert.deepEqual(loadConfig(pluginData), cfg);
 });
 
 test("promotion never leaves the destination writable to group or other", () => {
   const home = tmpHome();
   const pluginData = tmpPluginData();
-  const cfg: DeviceConfig = { token: "tok", ingestUrl: "https://api.example/ingest/batches", deviceId: "dev1" };
+  const cfg: DeviceConfig = { token: "tok", ingestUrl: "https://api.example/api/v1/ingest/batches", deviceId: "dev1" };
   writePendingConfig(home, cfg);
-  promotePendingConfig(home, pluginData);
+  promotePendingConfig(home, pluginData, "https://api.example");
 
   const configMode = mode(join(pluginData, "config.json"));
   assert.equal(configMode & 0o077, 0, `group/other must have no access: mode ${configMode.toString(8)}`);
