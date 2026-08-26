@@ -1,12 +1,13 @@
 ---
 name: trinity-connect
-description: Pair this Codex CLI installation with Trinity capture
+description: Pair this Codex App or CLI installation with Trinity capture
 ---
 
 Connect this Codex installation with the short-lived pairing code the user provided.
 
 1. Run `codex plugin list --json` and find the `installedPath` for
-   `trinity-capture@trinity`. Stop with a clear error if it is not installed.
+   the installed plugin named `trinity-capture`, regardless of marketplace. Stop
+   with a clear error if it is not installed.
 2. Ask to run the next command outside the Codex sandbox. It needs network access to
    exchange the code and writes the device credential under `~/.codex`; never print
    the pairing code.

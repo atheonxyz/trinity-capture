@@ -1,18 +1,30 @@
 {
   "name": "trinity-capture",
-  "description": "Captures Codex CLI sessions into Trinity for allowlisted repositories.",
-  "version": "0.1.0",
+  "description": "Captures Codex App and CLI sessions into Trinity for allowlisted repositories.",
+  "version": "0.3.1",
   "skills": "./skills/",
   "author": {
-    "name": "Trinity"
+    "name": "Trinity",
+    "email": "hi@usetrinity.ai",
+    "url": "https://usetrinity.ai"
   },
+  "homepage": "https://usetrinity.ai",
+  "repository": "https://github.com/atheonxyz/trinity-capture",
+  "license": "Apache-2.0",
+  "keywords": ["coding sessions", "developer tools", "team context"],
   "interface": {
     "displayName": "Trinity Capture",
     "shortDescription": "Capture Codex sessions in Trinity.",
-    "longDescription": "Captures Codex CLI sessions for repositories enabled in Trinity.",
+    "longDescription": "Captures Codex App and CLI sessions for repositories enabled in Trinity. Unmatched repositories stay local. Requires Node.js 20 or newer.",
     "developerName": "Trinity",
     "category": "Productivity",
     "capabilities": [],
-    "defaultPrompt": "Connect this Codex installation to Trinity."
+    "websiteURL": "https://usetrinity.ai",
+    "privacyPolicyURL": "https://usetrinity.ai/privacy",
+    "termsOfServiceURL": "https://usetrinity.ai/terms",
+    "defaultPrompt": ["Connect Codex to Trinity."],
+    "brandColor": "#151517",
+    "logo": "./assets/trinity.svg",
+    "screenshots": ["./assets/setup.png"]
   }
 }
