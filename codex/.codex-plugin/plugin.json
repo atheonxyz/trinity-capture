@@ -1,0 +1,18 @@
+{
+  "name": "trinity-capture",
+  "description": "Captures Codex CLI sessions into Trinity for allowlisted repositories.",
+  "version": "0.1.0",
+  "skills": "./skills/",
+  "author": {
+    "name": "Trinity"
+  },
+  "interface": {
+    "displayName": "Trinity Capture",
+    "shortDescription": "Capture Codex sessions in Trinity.",
+    "longDescription": "Captures Codex CLI sessions for repositories enabled in Trinity.",
+    "developerName": "Trinity",
+    "category": "Productivity",
+    "capabilities": [],
+    "defaultPrompt": "Connect this Codex installation to Trinity."
+  }
+}

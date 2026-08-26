@@ -14,6 +14,7 @@
   "scripts": {
     "typecheck": "tsc -b",
     "build:plugin": "tsc -p tsconfig.plugin.json",
+    "build:codex": "tsc -p tsconfig.codex-plugin.json",
     "test": "node --test dist-test/**/*.test.js"
   },
   "devDependencies": {
