@@ -1,0 +1,9 @@
+{
+  "name": "trinity-capture",
+  "description": "Captures Cursor CLI sessions into Trinity for allowlisted repositories.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Trinity"
+  },
+  "hooks": "hooks/hooks.json"
+}

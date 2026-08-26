@@ -1,13 +1,10 @@
 # Trinity capture plugins
 
 The client half of Trinity's IDE session ingestion: a shared TypeScript core plus one
-plugin per coding product. Claude Code ships in Phase 1; Codex ships in Phase 3 (this
-package); Cursor is designed (see the design doc) but not yet built.
-
-Distribution is internal/sideload only for every plugin here — a local plugin-dir
-install or project-level hook config, not a public marketplace listing. Each product's
-own plugin directory (`claude-code/`, `codex/`) is self-contained: everything an install
-needs lives under it, so removing that one directory leaves nothing dangling elsewhere.
+plugin per coding product. Claude Code ships in Phase 1; Codex and Cursor ship in
+Phase 3. Distribution is internal/sideload only for every plugin here, not a public
+marketplace listing. Each product's own plugin directory (`claude-code/`, `codex/`,
+`cursor/`) is self-contained, so removing it leaves nothing dangling elsewhere.
 
 ## Setup (Claude Code)
 
@@ -30,6 +27,38 @@ Requires Node 20 or newer. Check with `node --version` before installing.
 `/trinity:connect` exchanges the pairing code against, for pointing a
 local build at a non-production backend.
 
+## Setup (Cursor)
+
+Phase 3 ships Cursor **internal/sideload only**: Cursor's official Marketplace requires
+submitted plugins to be open source and human-reviewed, which conflicts with this
+private repo. Publishing there is a separate, later release decision.
+
+0. Prerequisite: Node >= 20 (`cursor-connect.js` checks this itself and errors loudly
+   below it). Confirm with `node --version`.
+1. Install the plugin from a local checkout of this repo (Cursor loads either plugin
+   format from `~/.cursor/plugins/local`): symlink or copy this repository's `cursor/`
+   directory in, e.g. `ln -s $(pwd)/cursor ~/.cursor/plugins/local/trinity-capture`. A
+   team marketplace import (Dashboard → Plugins → Import from Repo, for admins) against
+   this repository's `.cursor-plugin/marketplace.json` also works once the repo is
+   reachable to the importing account.
+2. Connect this device from a terminal — Cursor's plugin commands have no proven
+   equivalent of Claude Code's `!command` shell execution, so this ships as a plain CLI
+   script rather than a speculative slash command:
+   `node ~/.cursor/plugins/local/trinity-capture/dist/cursor-connect.js <code>` with the
+   pairing code shown on your Trinity dashboard's IDE integrations page. This writes a
+   mode-0600 `DeviceConfig`, syncs the repository allowlist, and reports success only
+   when both are ready under a mode-0700 directory — never into the repo, never into
+   shell history, and never into a Cursor plugin variable (those are dashboard-entered
+   and would replace this pairing UX).
+3. That's it. The plugin captures `cursor-agent` CLI sessions automatically for every
+   repository one of your projects has selected, the same allowlist and fail-closed rules
+   as Claude Code below, plus one Cursor-specific rule: an event whose `workspace_roots`
+   names more than one repository is dropped whole rather than guessed (see Multi-root
+   fail-closed below).
+
+`TRINITY_CAPTURE_DATA` overrides where credentials/policy/outbox live (default: the
+platform's secured per-user application-data directory — see Credential home below).
+`TRINITY_BASE_URL` behaves exactly as it does for Claude Code.
 ## Setup (Codex CLI)
 
 0. Prerequisite: Node >= 20 — `codex-connect.js` checks this itself and errors loudly
@@ -83,44 +112,50 @@ If a given Codex build's plugin layer proves too immature to install through (sp
    writes the pending record under `$CODEX_HOME/trinity-capture/`, but you can also just
    pre-seed `<that dir>/config.json` with `{"token","ingestUrl","deviceId"}` from the
    dashboard's raw device credentials if you'd rather skip the pairing exchange
-   entirely.
+entirely.
 
 ## Architecture
 
 ```
 trinity-capture/
 ├── src/
-│   ├── config.ts        DeviceConfig + Policy: load/save from a dialect's dataDir
+│   ├── config.ts         DeviceConfig + Policy: load/save from a dialect's dataDir
 │   ├── gate.ts           routeFor(): the fail-closed allowlist check
 │   ├── outbox.ts         appendEvent()/drain(): local queue, batched send
 │   ├── send.ts           sendBatch()/refreshPolicy(): the wire calls, network-bounded
 │   ├── observe.ts        gitRemoteOf()/workspaceObserved(): local git metadata
 │   ├── hook-core.ts      runHook(): the shared engine every dialect's entry calls
 │   ├── claude-hook.ts    the Claude Code Dialect table + its hook entrypoint
-│   ├── connect.ts        exchange(): the pairing-code exchange every /trinity-connect shares
+│   ├── connect.ts        exchange(): the shared pairing-code exchange
 │   ├── codex-hook.ts     the Codex Dialect table + its hook entrypoint
-│   └── codex-connect.ts  the Codex trinity-connect skill's entrypoint (pending→PLUGIN_DATA)
+│   ├── codex-connect.ts  Codex's pending→PLUGIN_DATA pairing entrypoint
+│   ├── cursor-hook.ts    the Cursor Dialect table + multi-root fail-closed entrypoint
+│   └── cursor-connect.ts the manual Cursor pairing entrypoint
 ├── claude-code/
 │   ├── .claude-plugin/plugin.json
 │   ├── hooks/hooks.json     registers the five lifecycle hooks
 │   ├── commands/connect.md
 │   └── dist/                the COMMITTED build the installed plugin executes
-└── codex/
-    ├── .codex-plugin/plugin.json
-    ├── hooks/hooks.json      registers the six lifecycle hooks (PreToolUse included)
-    ├── skills/trinity-connect/SKILL.md
-    └── dist/                 the COMMITTED build the installed plugin executes
+├── codex/
+│   ├── .codex-plugin/plugin.json
+│   ├── hooks/hooks.json      registers the six lifecycle hooks
+│   ├── skills/trinity-connect/SKILL.md
+│   └── dist/                 the COMMITTED build the installed plugin executes
+├── cursor/
+│   ├── .cursor-plugin/plugin.json    names hooks/hooks.json
+│   ├── hooks/hooks.json               registers the eight observed hook kinds
+│   └── dist/                          the COMMITTED build the installed plugin executes
+├── .agents/plugins/marketplace.json   Codex marketplace manifest
+└── .cursor-plugin/marketplace.json    Cursor marketplace manifest
 ```
 
 Each product's `dist/` is committed on purpose: an installed plugin runs whatever sits
 at `${PLUGIN_ROOT}/dist` (Claude Code: `${CLAUDE_PLUGIN_ROOT}`), with no build step of
-its own. `pnpm build:plugin` / `pnpm build:codex` regenerate them from `src/` (plain ESM,
-no bundler, no runtime dependencies) — rerun the relevant one and commit the output
-whenever `src/` changes. Each `tsconfig.*-plugin.json` lists only the source files that
-product's own hooks.json references, so one product's dist never bundles another's —
-adding a new dialect's files to `src/` never silently changes an existing dist.
-`test/packaging.test.ts` / `test/codex-packaging.test.ts` execute the committed
-`claude-hook.js` / `codex-hook.js` directly, so a stale or missing dist fails the suite.
+its own. `pnpm build:plugin`, `pnpm build:codex`, and `pnpm build:plugin-cursor`
+regenerate them from `src/` (plain ESM, no bundler, no runtime dependencies). Each
+`tsconfig.*-plugin.json` lists only the source files its product references, so adding
+one dialect never silently changes another product's dist. The packaging tests execute
+the committed binaries directly, so a stale or missing build fails the suite.
 
 Every hook invocation is a fresh, short-lived process — there is no daemon and nothing
 runs between hook events. Each product gets one thin `Dialect` table (vendor field
@@ -128,10 +163,10 @@ extraction, its payload allowlist, its data directory, and two predicates —
 `isSessionStart`, `drainsOn` — over its own event vocabulary) that `hook-core.ts`'s
 `runHook()` drives: it checks the gate, filters the payload to the capture level, appends
 it to the local outbox, and, only when `drainsOn(event)` says so, drains the outbox to
-the backend. Claude Code runs its ordinary hooks asynchronously. Codex does not support
-async command hooks, so its handlers stay synchronous and network only on `Stop` and
-`SessionEnd`, under the inline budget below. Whether a given event drains at all is each
-dialect's own call, not a shared rule. One
+the backend. Claude Code runs its ordinary hooks asynchronously. Codex and Cursor do not
+support async command hooks, so their handlers stay synchronous and use network only at
+their lifecycle drain points, under the inline budget below. Whether a given event drains
+at all is each dialect's own call, not a shared rule. One
 synthesized event, `workspace.observed`, supplements the native ones at whatever event
 `isSessionStart` names for that dialect: bounded, deterministic git metadata (branch,
 HEAD SHA, dirty flag, diffstat, changed files) that the server can never read directly.
@@ -150,13 +185,12 @@ open-turn-by-ordinal when it is absent.
 
 ## Network bounds
 
-Every fetch — batch sends, policy refreshes, `/trinity-connect`'s exchange — carries a
+Every fetch — batch sends, policy refreshes, and pairing-code exchange — carries a
 5 second `AbortSignal.timeout`, so a hanging server can never stall a hook indefinitely.
-An async-capable hook sets `drainInline: false` and keeps the open, multi-batch drain
-above. A dialect whose hooks run synchronously instead (`drainInline: true`) drains at
-most one batch per call, bounded by a 2 second wall-clock budget taken at hook entry —
-each fetch it starts is aborted at whatever remains of that budget, and the send is
-skipped entirely once the budget is already spent.
+Claude Code's detached hooks keep the open, multi-batch drain. Codex and Cursor hooks
+run synchronously, set `drainInline: true`, and drain at most one batch per call under a
+2 second wall-clock budget. Codex drains on `Stop` and `SessionEnd`; Cursor drains on
+`afterAgentResponse` and `sessionEnd`. Mid-turn tool/file hooks append locally and return.
 
 ## Capture levels
 
@@ -173,6 +207,43 @@ Phase 1 supports exactly one capture level, `metadata`, for every project:
 
 A `full-bodies` level (bounded, redacted tool call bodies, opt-in per project) is a
 designed extension, not implemented yet.
+
+## Credential home (Cursor)
+
+Claude Code and Codex both receive a plugin-scoped writable directory from the host
+(`CLAUDE_PLUGIN_DATA`, and Codex's `PLUGIN_DATA` for its own hook commands). Cursor's
+docs and its captured hook stream expose no equivalent: a hook command only ever
+receives `CURSOR_PLUGIN_ROOT` (the plugin's own read-only install directory) and a
+handful of session-scoped variables, never a writable per-plugin data path. Credentials
+therefore live in the secured per-user application-data location a desktop app would
+use instead, resolved by `cursorDialect.dataDir` in `src/cursor-hook.ts`:
+
+| Platform | Directory |
+| --- | --- |
+| Override (any platform) | `$TRINITY_CAPTURE_DATA` |
+| macOS | `~/Library/Application Support/Trinity Capture/cursor` |
+| Linux | `${XDG_STATE_HOME:-~/.local/state}/trinity-capture/cursor` |
+| Windows | `%LOCALAPPDATA%\Trinity Capture\cursor` |
+
+`cursor-connect.js` creates this directory at mode `0700` and writes `config.json` at
+mode `0600` (Windows relies on `%LOCALAPPDATA%` already being scoped to the current user
+by ACLs; POSIX `chmod` has no meaning there and is skipped). Cursor plugin *variables*
+(the `variables` field in `plugin.json`) are deliberately not used for this: they are
+dashboard-entered and would replace the pairing flow above with a manual paste of a
+long-lived token.
+
+## Multi-root fail-closed (Cursor)
+
+Every captured Cursor hook event carries `workspace_roots`, an array, rather than the
+single `cwd` string Claude Code's and Codex's hooks carry. The captured MVP dialect only
+ever observed a single entry, and no field in it says which of several roots a
+multi-root event would be about — so `cursor-hook.ts`'s entrypoint drops any event whose
+`workspace_roots` does not contain exactly one non-empty repository root, before it ever reaches the
+gate or the outbox, and records the drop in `status.json` (`reason: "multi_root"`) for a
+paired device. Guessing (the first entry, or falling back to the process's own cwd)
+would risk silently attributing a session to the wrong repository, which this design
+treats as strictly worse than dropping the event. Multi-root workspace support is a
+later, ledgered extension.
 
 ## Fail-closed guarantees
 
@@ -201,15 +272,17 @@ designed extension, not implemented yet.
   current document.
 - **Every hook path exits 0.** Nothing the plugin does — a malformed payload, a network
   failure, a bug — is allowed to surface as an error in the IDE.
+- **A multi-root Cursor event captures nothing.** See Multi-root fail-closed above.
 
 ## Dev commands
 
 ```bash
 pnpm install
-pnpm typecheck      # tsc -b
-pnpm test           # run pnpm typecheck first: node --test executes dist-test/
-pnpm build:plugin   # regenerate the committed claude-code/dist/ from src/
-pnpm build:codex    # regenerate the committed codex/dist/ from src/
+pnpm typecheck             # tsc -b
+pnpm test                  # run pnpm typecheck first: node --test executes dist-test/
+pnpm build:plugin          # regenerate the committed claude-code/dist/ from src/
+pnpm build:codex           # regenerate the committed codex/dist/ from src/
+pnpm build:plugin-cursor   # regenerate the committed cursor/dist/ from src/
 ```
 
 No runtime dependencies: Node stdlib only (`fs`, `crypto`, `child_process`, the
@@ -253,6 +326,43 @@ fetches the capture policy through `send.ts`'s real `refreshPolicy()`, replays t
 the backend's Task 5.1 adapter fixture) through the real `outbox.ts`/`send.ts` path, and
 polls the dashboard's sessions endpoint for the projected result.
 
+`test/e2e-cursor.test.ts` is Cursor's twin, gated on the same five `TRINITY_E2E_*`
+variables and skipped the same way. It pairs a `tool: "cursor"` device through
+`cursor-connect.ts`'s real `connectCursor()`, then replays the **raw** captured
+`cursor_session.jsonl` stream (unlike `claude_code_session.jsonl`, this fixture is the
+raw hook envelope, not wire-shaped — see the field-mapping table below) through
+`cursor-hook.ts`'s real `runCursorHook()`, which is the dialect and `hook-core.ts`
+together — the same pipeline a real Cursor install runs, not just the wire layer. It
+reuses the same seeded project/repo as the Claude Code smoke above; a
+`cursor-fixture`-specific seed is a possible backend-side follow-up, not required for
+this to pass.
+
+### Cursor dialect field mapping
+
+Pinned against the empirically captured `cursor-agent 2026.08.11-e8db854` CLI hook
+stream (`test/testdata/cursor_session.jsonl`, SHA-256
+`494d36e51c4c2fb8f76691089f0ef611432ec76c7767fcd04b5d4588a8e435ac`) and against the
+backend's own decoder of that same raw fixture
+(`trinity/backend/internal/store/coding/cursor.go`'s `projectCursor` +
+`cursor_test.go`'s `loadCursorFixture`) — this table is the contract between the two;
+`test/cursor-hook.test.ts`'s "full captured fixture" test is the executable proof on
+this side.
+
+| `hook_event_name` | Registered hook | Backend applier | Forwarded fields | Notes |
+| --- | --- | --- | --- | --- |
+| `sessionStart` | yes | `applySessionStart` | `hook_event_name`, `conversation_id`, `generation_id`, `model` | `sessionId` = `conversation_id`; `vendorTurnId` = null (session-scoped, despite carrying `generation_id`) |
+| `beforeSubmitPrompt` | yes | `applyPromptSubmitted` | `hook_event_name`, `conversation_id`, `generation_id`, `prompt` | preferred turn-key mint point; the fixture's first turn has none — `preToolUse` (its first turn-scoped event) mints instead (lazy mint) |
+| `preToolUse` | yes | quarantine | `hook_event_name`, `conversation_id`, `generation_id` | genuinely captured, never forwards `tool_input` |
+| `beforeReadFile` | yes | quarantine | `hook_event_name`, `conversation_id`, `generation_id` | genuinely captured, never forwards `content` or `file_path` |
+| `postToolUse` | yes | `applyToolUsed` | `hook_event_name`, `conversation_id`, `generation_id`, `tool_name`, `tool_use_id` | never forwards `tool_input`/`tool_output` |
+| `afterAgentResponse` | yes (drains) | `applyTurnStopped` | `hook_event_name`, `conversation_id`, `generation_id`, `text` | this dialect's Stop-equivalent — the sibling `stop` event carries no text |
+| `stop` | yes | quarantine | `hook_event_name`, `conversation_id`, `generation_id` | carries `status`/`loop_count`/token counts, never forwarded |
+| `sessionEnd` | yes (drains) | `applySessionEnded` | `hook_event_name`, `conversation_id`, `generation_id`, `reason` | `vendorTurnId` = null (session-scoped) |
+
+`workspace_roots` and `user_email` are never forwarded on any kind (an absolute local
+path and PII respectively); `afterAgentThought` is never even hooked, so its reasoning
+text can never reach the allowlist in the first place.
+
 `test/e2e-codex.test.ts` is the same idea for Codex, gated on the same five
 `TRINITY_E2E_*` env vars and seed step above, but pairs a `tool: "codex"` device and
 replays `test/testdata/codex_session.jsonl` through the REAL `codexDialect` +
@@ -260,6 +370,5 @@ replays `test/testdata/codex_session.jsonl` through the REAL `codexDialect` +
 raw-hook-shaped (the vendor's own field names, not a pre-built `CaptureEvent`), so
 there's no envelope to hand `appendEvent()` directly the way the Claude Code smoke does.
 It expects a project that has selected `github.com/acme/codex-fixture` (matching the
-Trinity repo's own `codex_test.go` fixture naming) and a backend built from a checkout
-carrying the codex decoder — until PR T2 merges to Trinity's `main`, that means starting
-the backend from `.worktrees/ide-codex` in step 1 above instead.
+Trinity repo's own `codex_test.go` fixture naming) and a backend build carrying the Codex
+decoder.

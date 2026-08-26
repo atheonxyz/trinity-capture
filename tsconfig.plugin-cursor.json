@@ -2,7 +2,7 @@
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "src",
-    "outDir": "claude-code/dist",
+    "outDir": "cursor/dist",
     "composite": false,
     "declaration": false,
     "incremental": false
@@ -14,7 +14,7 @@
     "src/send.ts",
     "src/observe.ts",
     "src/hook-core.ts",
-    "src/claude-hook.ts",
-    "src/connect.ts"
+    "src/cursor-hook.ts",
+    "src/cursor-connect.ts"
   ]
 }

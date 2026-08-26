@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      { "command": "node ${CURSOR_PLUGIN_ROOT}/dist/cursor-hook.js sessionStart" }
+    ],
+    "beforeSubmitPrompt": [
+      { "command": "node ${CURSOR_PLUGIN_ROOT}/dist/cursor-hook.js beforeSubmitPrompt" }
+    ],
+    "preToolUse": [
+      { "command": "node ${CURSOR_PLUGIN_ROOT}/dist/cursor-hook.js preToolUse" }
+    ],
+    "beforeReadFile": [
+      { "command": "node ${CURSOR_PLUGIN_ROOT}/dist/cursor-hook.js beforeReadFile" }
+    ],
+    "postToolUse": [
+      { "command": "node ${CURSOR_PLUGIN_ROOT}/dist/cursor-hook.js postToolUse" }
+    ],
+    "afterAgentResponse": [
+      { "command": "node ${CURSOR_PLUGIN_ROOT}/dist/cursor-hook.js afterAgentResponse" }
+    ],
+    "stop": [
+      { "command": "node ${CURSOR_PLUGIN_ROOT}/dist/cursor-hook.js stop" }
+    ],
+    "sessionEnd": [
+      { "command": "node ${CURSOR_PLUGIN_ROOT}/dist/cursor-hook.js sessionEnd" }
+    ]
+  }
+}

@@ -18,7 +18,7 @@ export interface CaptureEvent {
 
 export interface DropRecord {
   at: string;
-  reason: "oversized" | "poison" | "expired" | "capacity";
+  reason: "oversized" | "poison" | "expired" | "capacity" | "multi_root";
   captureEventId: string;
   kind: string;
 }
@@ -54,7 +54,7 @@ function isAlreadyQueued(err: unknown): boolean {
   return err instanceof Error && "code" in err && err.code === "EEXIST";
 }
 
-function recordDrop(dataDir: string, drop: Omit<DropRecord, "at">): void {
+export function recordDrop(dataDir: string, drop: Omit<DropRecord, "at">): void {
   const path = join(dataDir, "status.json");
   let drops: DropRecord[] = [];
 

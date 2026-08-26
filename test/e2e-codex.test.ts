@@ -3,8 +3,8 @@
 // (codex-hook.ts's codexDialect, hook-core.ts's runHook, send.ts's real
 // sendBatch/refreshPolicy, outbox.ts's real appendEvent/drain) — never a bare
 // fetch, and never a hand-built envelope standing in for the dialect. This is
-// what makes the smoke capture-side honest: T2's parametrized decoder test
-// (Trinity repo) already proves the backend's governed=true parity from a
+// what makes the smoke capture-side honest: Trinity's parametrized decoder test
+// already proves the backend's governed=true parity from a
 // synthetic envelope; this smoke instead proves the PLUGIN's own raw→envelope
 // mapping produces a backend-visible result that matches it.
 //
@@ -39,7 +39,7 @@ const postgresURL = process.env.TRINITY_E2E_POSTGRES_URL;
 const ready = Boolean(e2eURL && sessionToken && projectId && userId && postgresURL);
 const skip = ready
   ? false
-  : "set TRINITY_E2E_URL, TRINITY_E2E_SESSION_TOKEN, TRINITY_E2E_PROJECT_ID, TRINITY_E2E_USER_ID, TRINITY_E2E_POSTGRES_URL to run (see README.md). The Trinity backend must be started from a checkout carrying the codex decoder (T2) — .worktrees/ide-codex until it merges to main.";
+  : "set TRINITY_E2E_URL, TRINITY_E2E_SESSION_TOKEN, TRINITY_E2E_PROJECT_ID, TRINITY_E2E_USER_ID, TRINITY_E2E_POSTGRES_URL to run (see README.md).";
 
 const SEEDED_REPO_REMOTE = "git@github.com:acme/codex-fixture.git";
 const SEEDED_CANONICAL_REPO = "github.com/acme/codex-fixture";
