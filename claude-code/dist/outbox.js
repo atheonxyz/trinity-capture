@@ -22,7 +22,7 @@ function fileFor(dir, ev) {
 function isAlreadyQueued(err) {
     return err instanceof Error && "code" in err && err.code === "EEXIST";
 }
-function recordDrop(dataDir, drop) {
+export function recordDrop(dataDir, drop) {
     const path = join(dataDir, "status.json");
     let drops = [];
     try {

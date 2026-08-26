@@ -173,7 +173,7 @@ Every captured Cursor hook event carries `workspace_roots`, an array, rather tha
 single `cwd` string Claude Code's and Codex's hooks carry. The captured MVP dialect only
 ever observed a single entry, and no field in it says which of several roots a
 multi-root event would be about — so `cursor-hook.ts`'s entrypoint drops any event whose
-`workspace_roots` names more than one repository whole, before it ever reaches the
+`workspace_roots` does not contain exactly one non-empty repository root, before it ever reaches the
 gate or the outbox, and records the drop in `status.json` (`reason: "multi_root"`) for a
 paired device. Guessing (the first entry, or falling back to the process's own cwd)
 would risk silently attributing a session to the wrong repository, which this design

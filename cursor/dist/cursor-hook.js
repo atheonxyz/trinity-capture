@@ -24,6 +24,9 @@ function str(payload, key) {
     const value = payload[key];
     return typeof value === "string" && value !== "" ? value : null;
 }
+function isRecord(value) {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 // The captured dialect's only cwd-shaped field is workspace_roots (an
 // array), never a literal "cwd" string the way claude_code's hooks carry
 // one. A single entry names an exact root; anything else (0 or 2+) is
@@ -104,9 +107,11 @@ function resolveDataDir(env) {
 // actually paired (loadConfig succeeds): an unpaired device's dataDir may
 // not exist yet, and it captures nothing else either.
 export async function runCursorHook(event, stdin, env) {
-    const payload = JSON.parse(stdin);
-    const roots = payload["workspace_roots"];
-    if (Array.isArray(roots) && roots.length > 1) {
+    const parsed = JSON.parse(stdin);
+    const payload = isRecord(parsed) ? parsed : null;
+    const roots = payload?.["workspace_roots"];
+    const root = Array.isArray(roots) && roots.length === 1 ? roots[0] : null;
+    if (typeof root !== "string" || root === "") {
         const dataDir = cursorDialect.dataDir(env);
         if (dataDir && loadConfig(dataDir)) {
             recordDrop(dataDir, { reason: "multi_root", captureEventId: randomUUID(), kind: event });
