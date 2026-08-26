@@ -104,20 +104,12 @@ function resolveDataDir(env: NodeJS.ProcessEnv): string | null {
   }
 }
 
-// Multi-root fail-closed (finding 4): an event whose workspace_roots names
-// more than one entry is dropped whole, never handed to runHook — there is
-// no field in the captured dialect that names which of several roots the
-// event is about, so guessing (e.g. falling back to the first entry, or to
-// process.cwd()) would risk attributing a session to the wrong repository.
-// The drop is recorded in plugin status, but only once this device is
-// actually paired (loadConfig succeeds): an unpaired device's dataDir may
-// not exist yet, and it captures nothing else either.
+// Cursor's only trustworthy repo field must name exactly one root. Invalid
+// roots are dropped before runHook can fall back to process.cwd().
 export async function runCursorHook(event: string, stdin: string, env: NodeJS.ProcessEnv): Promise<void> {
   const parsed: unknown = JSON.parse(stdin);
   const payload = isRecord(parsed) ? parsed : null;
-  const roots = payload?.["workspace_roots"];
-  const root = Array.isArray(roots) && roots.length === 1 ? roots[0] : null;
-  if (typeof root !== "string" || root === "") {
+  if (payload === null || singleWorkspaceRoot(payload) === null) {
     const dataDir = cursorDialect.dataDir(env);
     if (dataDir && loadConfig(dataDir)) {
       recordDrop(dataDir, { reason: "multi_root", captureEventId: randomUUID(), kind: event });

@@ -177,7 +177,7 @@ test("the full captured fixture, replayed in order, matches the backend's own en
     } else {
       assert.equal(newFiles.length, 1, `hook_event_name=${kind} must append exactly one event`);
     }
-    events.push(own!);
+    events.push(own);
   }
 
   assert.equal(events.length, lines.length, "every observed hook_event_name is captured, even the ones the backend later quarantines");
@@ -207,9 +207,12 @@ test("the full captured fixture, replayed in order, matches the backend's own en
   const turnGens = [...byGen.keys()].filter((g) => g !== lifecycleGen);
   assert.equal(turnGens.length, 2, "the fixture carries exactly two real turns");
   const turnKeysByGen = turnGens.map((g) => {
-    const keys = byGen.get(g)!;
+    const keys = byGen.get(g);
+    assert.ok(keys);
     assert.ok(keys.every((k) => k !== undefined && k === keys[0]), `all events of generation_id ${g} must share one minted turnKey`);
-    return keys[0] as string;
+    const key = keys[0];
+    assert.ok(key);
+    return key;
   });
   assert.notEqual(turnKeysByGen[0], turnKeysByGen[1], "the two turns must never collide on the same minted key");
 
@@ -231,7 +234,8 @@ test("the full captured fixture, replayed in order, matches the backend's own en
 
 test("multi-root fail-closed: both legs, the captured payload modified only in workspace_roots", async () => {
   const { dataDir, repo } = pairedDataDir();
-  const captured = fixtureLines().find((l) => l.hook_event_name === "postToolUse")!;
+  const captured = fixtureLines().find((l) => l.hook_event_name === "postToolUse");
+  assert.ok(captured);
 
   // Leg A: the event names exactly one root (retargeted to a real repo so
   // the rest of the pipeline can actually run) — captured through normally.
@@ -254,7 +258,8 @@ test("multi-root fail-closed: both legs, the captured payload modified only in w
 
 test("multi-root fail-closed applies even to a lifecycle event (sessionStart)", async () => {
   const { dataDir, repo } = pairedDataDir();
-  const captured = fixtureLines().find((l) => l.hook_event_name === "sessionStart")!;
+  const captured = fixtureLines().find((l) => l.hook_event_name === "sessionStart");
+  assert.ok(captured);
   const multiRoot = { ...captured, workspace_roots: [repo, "/workspace/some-other-repo"] };
 
   await run("sessionStart", multiRoot, dataDir);
@@ -267,7 +272,8 @@ test("multi-root fail-closed applies even to a lifecycle event (sessionStart)", 
 
 test("multi-root drop is recorded only for a paired device — an unpaired device stays silent, same as every other hook path", async () => {
   const dataDir = join(tmpdir(), `trinity-cursor-unpaired-${process.pid}-${Date.now()}`); // deliberately never created: no saveConfig, never paired
-  const captured = fixtureLines().find((l) => l.hook_event_name === "postToolUse")!;
+  const captured = fixtureLines().find((l) => l.hook_event_name === "postToolUse");
+  assert.ok(captured);
   const multiRoot = { ...captured, workspace_roots: ["/a", "/b"] };
 
   await assert.doesNotReject(run("postToolUse", multiRoot, dataDir));
