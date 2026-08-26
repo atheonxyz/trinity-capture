@@ -3,6 +3,11 @@ import { loadConfig, saveConfig } from "./config.js";
 import { isPolicyFresh } from "./gate.js";
 import { refreshPolicy, REQUEST_TIMEOUT_MS } from "./send.js";
 const DEFAULT_BASE_URL = "https://api.usetrinity.ai";
+const MIN_NODE_MAJOR = 20;
+export function supportsNodeVersion(version) {
+    const major = Number.parseInt(version.split(".", 1)[0] ?? "", 10);
+    return Number.isInteger(major) && major >= MIN_NODE_MAJOR;
+}
 export async function exchange(baseUrl, code) {
     const res = await fetch(`${baseUrl}/api/v1/devices/exchange`, {
         method: "POST",
@@ -19,6 +24,11 @@ export async function exchange(baseUrl, code) {
     return { token: body.token, ingestUrl: body.ingestUrl, deviceId: body.deviceId };
 }
 async function main() {
+    if (!supportsNodeVersion(process.versions.node)) {
+        console.error(`Trinity capture requires Node ${MIN_NODE_MAJOR} or newer; found ${process.version}.`);
+        process.exitCode = 1;
+        return;
+    }
     const dataDir = process.env.CLAUDE_PLUGIN_DATA ?? process.argv[3];
     if (!dataDir) {
         console.error("CLAUDE_PLUGIN_DATA is not set; cannot store credentials.");

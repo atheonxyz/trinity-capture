@@ -6,6 +6,8 @@ plugin per coding product. Claude Code ships in Phase 1; Codex and Cursor are de
 
 ## Setup (Claude Code)
 
+Requires Node 20 or newer. Check with `node --version` before installing.
+
 1. Install the `trinity-capture` plugin with
    `/plugin marketplace add https://github.com/atheonxyz/trinity-capture.git` (the
    repository's `.claude-plugin/marketplace.json` names the plugin), then

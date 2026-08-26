@@ -7,7 +7,7 @@ export class BatchRequestError extends Error {
         this.status = status;
     }
 }
-export async function sendBatch(cfg, events) {
+export async function sendBatch(cfg, events, timeoutMs = REQUEST_TIMEOUT_MS) {
     const res = await fetch(cfg.ingestUrl, {
         method: "POST",
         headers: {
@@ -16,20 +16,20 @@ export async function sendBatch(cfg, events) {
             "X-Trinity-Wire-Version": "1",
         },
         body: JSON.stringify({ items: events }),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok)
         throw new BatchRequestError(res.status);
     const body = (await res.json());
     return body.results;
 }
-export async function refreshPolicy(dataDir, cfg) {
+export async function refreshPolicy(dataDir, cfg, timeoutMs = REQUEST_TIMEOUT_MS) {
     const current = loadPolicy(dataDir);
     const policyUrl = cfg.ingestUrl.replace(/\/batches$/, "/policy");
     const headers = { Authorization: `Bearer ${cfg.token}` };
     if (current)
         headers["If-None-Match"] = current.etag;
-    const res = await fetch(policyUrl, { headers, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+    const res = await fetch(policyUrl, { headers, signal: AbortSignal.timeout(timeoutMs) });
     if (res.status === 304 && current) {
         const refreshed = { ...current, fetchedAt: Date.now() };
         savePolicy(dataDir, refreshed);

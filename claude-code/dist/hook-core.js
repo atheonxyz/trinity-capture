@@ -6,7 +6,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig, loadPolicy } from "./config.js";
-import { routeFor } from "./gate.js";
+import { isPolicyFresh, matchRoute, routeFor } from "./gate.js";
 import { appendEvent, drain, INLINE_DRAIN_BUDGET_MS } from "./outbox.js";
 import { gitRemoteOf, repoRelativeCwd, workspaceObserved } from "./observe.js";
 import { refreshPolicy } from "./send.js";
@@ -17,6 +17,9 @@ function filterPayload(payload, allowed) {
             out[key] = payload[key];
     }
     return out;
+}
+function isRecord(value) {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 // --- turn-key store ---
 // One write-once file per vendor turn id, never a shared map: two hook
@@ -31,8 +34,7 @@ function filterPayload(payload, allowed) {
 // hex-encode the whole id in that one case rather than leaving a
 // traversal-shaped name on disk.
 function sanitizeTurnId(id) {
-    const mapped = id.replace(/[^A-Za-z0-9._-]/g, (ch) => Buffer.from(ch, "utf8").toString("hex"));
-    return mapped === "." || mapped === ".." || mapped === "" ? Buffer.from(id, "utf8").toString("hex") || "empty" : mapped;
+    return `id-${Buffer.from(id, "utf8").toString("hex") || "empty"}`;
 }
 // Exported for the same reason claimTurnKey is: a direct test that the
 // resolved directory can never escape dataDir/turnkeys/, whatever a hostile
@@ -55,7 +57,7 @@ export function claimTurnKey(sessionDir, vendorTurnId) {
         return minted;
     }
     catch (err) {
-        if (err.code !== "EEXIST")
+        if (!(err instanceof Error) || !("code" in err) || err.code !== "EEXIST")
             throw err;
         return readFileSync(file, "utf8"); // another process won the race — read its key back
     }
@@ -102,34 +104,44 @@ export async function runHook(d, event, stdin, env) {
     const dataDir = d.dataDir(env);
     if (!dataDir)
         return; // dialect found no durable writable dir — never paired, or the host gave none
+    const parsed = JSON.parse(stdin);
+    if (!isRecord(parsed))
+        return;
+    const payload = parsed;
+    if (d.suppress?.(dataDir, event, payload))
+        return;
     const cfg = loadConfig(dataDir);
     if (!cfg)
         return; // never authorized — fail closed, zero network requests
-    const payload = JSON.parse(stdin);
     // Self-healing happens before the gate, not after: routeFor already
     // fails closed on a stale policy, so a refresh attempted only once
     // send:false has been decided can never run. Scoped to the dialect's own
     // session-start moment, not a literal event name — hook-core carries no
     // vendor vocabulary of its own.
+    const cwd = d.cwd(event, payload) ?? process.cwd();
+    const gitRemote = gitRemoteOf(cwd);
     let policy = loadPolicy(dataDir);
-    if (d.isSessionStart(event)) {
-        const stale = !policy || Date.now() > policy.fetchedAt + policy.ttlSeconds * 1000;
-        if (stale) {
+    if (!matchRoute(policy, gitRemote).send)
+        return;
+    if (d.isSessionStart(event) && !isPolicyFresh(policy, Date.now())) {
+        const remaining = d.drainInline ? hookEntryDeadline - Date.now() : undefined;
+        if (remaining === undefined || remaining > 0) {
             try {
-                policy = await refreshPolicy(dataDir, cfg);
+                policy = await refreshPolicy(dataDir, cfg, remaining);
             }
             catch {
-                // best-effort: routeFor below still fails closed on whatever policy we have
+                policy = null;
             }
         }
     }
-    const cwd = d.cwd(event, payload) ?? process.cwd();
-    const route = routeFor(policy, Date.now(), gitRemoteOf(cwd));
+    const route = routeFor(policy, Date.now(), gitRemote);
     if (!route.send)
         return; // not allowlisted, or policy missing/still stale — no event, no drain
     const sessionId = d.sessionId(event, payload) ?? "";
     const repoCwd = repoRelativeCwd(cwd);
-    const turnKey = sessionId === "" ? undefined : resolveTurnKey(dataDir, d, event, sessionId, payload);
+    const turnKey = sessionId === "" || d.isSessionStart(event)
+        ? undefined
+        : resolveTurnKey(dataDir, d, event, sessionId, payload);
     const captureEvent = {
         captureEventId: randomUUID(),
         tool: d.tool,

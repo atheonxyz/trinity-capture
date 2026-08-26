@@ -2,7 +2,8 @@
 // argv[2] and the hook JSON on stdin. Must never throw to the IDE: the CLI
 // bootstrap below always exits 0. Everything vendor-specific lives here as
 // one Dialect table; runHook (hook-core.ts) owns the shared engine.
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { runHook } from "./hook-core.js";
 function str(payload, key) {
@@ -17,6 +18,7 @@ function str(payload, key) {
 // name, not absolute local paths (cwd, transcript_path), not anything
 // reasoning/thinking-named.
 const ALLOW_EVERY_EVENT = ["hook_event_name", "session_id", "prompt_id", "permission_mode"];
+const CONNECT_COMMAND = /^\/trinity:connect(?:\s|$)/;
 const ALLOW_PER_EVENT = {
     SessionStart: ["source"],
     // The prompt text and the assistant reply are the capture contract (spec
@@ -26,6 +28,37 @@ const ALLOW_PER_EVENT = {
     Stop: ["stop_hook_active", "last_assistant_message"],
     SessionEnd: ["reason"],
 };
+function suppressedSessionFile(dataDir, sessionId) {
+    return join(dataDir, "suppressed-sessions", `claude_code-${encodeURIComponent(sessionId)}`);
+}
+function suppressConnectSession(dataDir, event, payload) {
+    const sessionId = str(payload, "session_id") ?? "";
+    if (event === "UserPromptSubmit" && typeof payload.prompt === "string" && CONNECT_COMMAND.test(payload.prompt.trimStart())) {
+        if (sessionId !== "") {
+            const file = suppressedSessionFile(dataDir, sessionId);
+            try {
+                mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+                writeFileSync(file, "", { mode: 0o600 });
+            }
+            catch (error) {
+                if (!(error instanceof Error))
+                    throw error;
+            }
+        }
+        return true;
+    }
+    if (sessionId === "")
+        return false;
+    try {
+        readFileSync(suppressedSessionFile(dataDir, sessionId));
+        return true;
+    }
+    catch (error) {
+        if (error instanceof Error)
+            return false;
+        throw error;
+    }
+}
 export const claudeCodeDialect = {
     tool: "claude_code",
     sessionId: (_event, payload) => str(payload, "session_id"),
@@ -37,6 +70,7 @@ export const claudeCodeDialect = {
     // true, unlike its four siblings) — it must stay append-only and
     // timeout-bounded, so it's the one event that never drains.
     drainsOn: (event) => event !== "SessionEnd",
+    suppress: suppressConnectSession,
     allow: (event) => [...ALLOW_EVERY_EVENT, ...(ALLOW_PER_EVENT[event] ?? [])],
     // Async-capable: four of Claude's five hooks run detached ("async": true
     // in hooks.json), so the open multi-batch drain in hook-core is fine.

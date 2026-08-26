@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync }
 import { join } from "node:path";
 import { BatchRequestError, refreshPolicy, sendBatch } from "./send.js";
 const MAX_BATCHES = 5;
+export const INLINE_DRAIN_BUDGET_MS = 2_000;
 const MAX_EVENTS_PER_BATCH = 100;
 const MAX_EVENT_BYTES = 256 * 1024;
 const MAX_BATCH_BYTES = 3 * 1024 * 1024;
@@ -95,7 +96,10 @@ export function appendEvent(dataDir, ev) {
     }
     enforceOutboxLimit(dataDir, dir);
 }
-export async function drain(dataDir, cfg) {
+const openDrain = { inline: false, deadline: 0 };
+export async function drain(dataDir, cfg, options = openDrain) {
+    if (options.inline && Date.now() >= options.deadline)
+        return;
     const dir = outboxDir(dataDir);
     const files = readdirSync(dir)
         .filter((f) => f.endsWith(".jsonl"))
@@ -133,7 +137,8 @@ export async function drain(dataDir, cfg) {
     }
     let offset = 0;
     let policyStale = false;
-    for (let batch = 0; batch < MAX_BATCHES && offset < entries.length; batch++) {
+    const maxBatches = options.inline ? 1 : MAX_BATCHES;
+    for (let batch = 0; batch < maxBatches && offset < entries.length; batch++) {
         const slice = [];
         let sliceBytes = 0;
         while (offset < entries.length && slice.length < MAX_EVENTS_PER_BATCH) {
@@ -144,13 +149,13 @@ export async function drain(dataDir, cfg) {
             sliceBytes += next.bytes;
             offset++;
         }
-        const outcome = await deliverBatch(dir, dataDir, cfg, slice);
+        const outcome = await deliverBatch(dir, dataDir, cfg, slice, options);
         if (outcome === "abort")
             break;
         if (outcome.policyStale)
             policyStale = true;
     }
-    if (policyStale) {
+    if (policyStale && !options.inline) {
         try {
             await refreshPolicy(dataDir, cfg);
         }
@@ -161,10 +166,13 @@ export async function drain(dataDir, cfg) {
         }
     }
 }
-async function deliverBatch(dir, dataDir, cfg, entries) {
+async function deliverBatch(dir, dataDir, cfg, entries, options) {
     let results;
     try {
-        results = await sendBatch(cfg, entries.map((e) => e.event));
+        const remaining = options.inline ? options.deadline - Date.now() : undefined;
+        if (remaining !== undefined && remaining <= 0)
+            return "abort";
+        results = await sendBatch(cfg, entries.map((e) => e.event), remaining);
     }
     catch (err) {
         if (err instanceof BatchRequestError && err.status === 413) {
@@ -174,10 +182,10 @@ async function deliverBatch(dir, dataDir, cfg, entries) {
                 return { policyStale: false };
             }
             const mid = Math.ceil(entries.length / 2);
-            const left = await deliverBatch(dir, dataDir, cfg, entries.slice(0, mid));
+            const left = await deliverBatch(dir, dataDir, cfg, entries.slice(0, mid), options);
             if (left === "abort")
                 return "abort";
-            const right = await deliverBatch(dir, dataDir, cfg, entries.slice(mid));
+            const right = await deliverBatch(dir, dataDir, cfg, entries.slice(mid), options);
             if (right === "abort")
                 return "abort";
             return { policyStale: left.policyStale || right.policyStale };
