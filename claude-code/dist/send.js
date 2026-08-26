@@ -1,5 +1,5 @@
 import { loadPolicy, savePolicy } from "./config.js";
-export const REQUEST_TIMEOUT_MS = 10_000;
+export const REQUEST_TIMEOUT_MS = 5_000;
 export class BatchRequestError extends Error {
     status;
     constructor(status) {
