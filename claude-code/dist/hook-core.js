@@ -3,7 +3,7 @@
 // turn-key correlation, the outbox append, and bounded-network draining. A
 // dialect supplies only vendor-specific field extraction and event naming.
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig, loadPolicy } from "./config.js";
 import { isPolicyFresh, matchRoute, routeFor } from "./gate.js";
@@ -40,15 +40,20 @@ export function claimTurnKey(sessionDir, vendorTurnId) {
     const file = join(sessionDir, sanitizeTurnId(vendorTurnId));
     mkdirSync(sessionDir, { recursive: true });
     const minted = randomUUID();
+    const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
+    writeFileSync(temporary, minted, { flag: "wx", mode: 0o600 });
     try {
-        writeFileSync(file, minted, { flag: "wx" });
+        linkSync(temporary, file);
         return minted;
     }
     catch (err) {
         if (err instanceof Error && "code" in err && err.code === "EEXIST") {
-            return readFileSync(file, "utf8"); // another process won the race — read its key back
+            return readFileSync(file, "utf8");
         }
         throw err;
+    }
+    finally {
+        rmSync(temporary, { force: true });
     }
 }
 // latest is a separate one-line temp+rename file, consulted only by events
