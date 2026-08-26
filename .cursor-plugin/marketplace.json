@@ -1,7 +1,8 @@
 {
   "name": "trinity",
   "owner": {
-    "name": "Trinity"
+    "name": "Trinity",
+    "email": "hi@usetrinity.ai"
   },
   "metadata": {
     "description": "Trinity's Cursor plugins."
@@ -9,9 +10,16 @@
   "plugins": [
     {
       "name": "trinity-capture",
-      "description": "Captures Cursor CLI sessions into Trinity for allowlisted repositories.",
-      "version": "0.1.0",
-      "source": "./cursor"
+      "description": "Captures Cursor coding sessions into Trinity for allowlisted repositories.",
+      "version": "0.3.0",
+      "source": "./cursor",
+      "author": { "name": "Trinity", "email": "hi@usetrinity.ai" },
+      "homepage": "https://usetrinity.ai",
+      "repository": "https://github.com/atheonxyz/trinity-capture",
+      "license": "Apache-2.0",
+      "keywords": ["coding sessions", "developer tools", "team context"],
+      "logo": "assets/trinity.svg",
+      "category": "Productivity"
     }
   ]
 }

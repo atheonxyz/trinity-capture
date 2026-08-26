@@ -1,16 +1,9 @@
-// Connect flow: exchange against a stub server writes a mode-0700 data
-// directory and a mode-0600 DeviceConfig under it (spec finding 3 — no
-// CURSOR_PLUGIN_DATA equivalent exists, so this is the secured per-user
-// application-data location cursorDialect.dataDir resolves). The credential
-// home is PROVEN, not assumed: the same dataDir a following cursor-hook.js
-// SessionStart invocation reads back from must be the exact one connect
-// wrote to.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
-import { connectCursor } from "../src/cursor-connect.js";
+import { authorizeCursor, connectCursor } from "../src/cursor-connect.js";
 import { cursorDialect } from "../src/cursor-hook.js";
 import { loadConfig } from "../src/config.js";
 
@@ -42,7 +35,7 @@ function stubExchange(deviceConfig: { token: string; ingestUrl: string; deviceId
 
 test("connect writes a 0700 data dir and a 0600 config.json a device did not have before", async () => {
   const parent = tmpParentDir();
-  const dataDir = join(parent, "cursor"); // deliberately not pre-created — connect must make it
+  const dataDir = join(parent, "cursor");
   const restore = stubExchange({ token: "tok-1", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev-1" });
   try {
     await connectCursor("http://example.invalid", "PAIR-CODE", dataDir);
@@ -62,6 +55,76 @@ test("connect writes a 0700 data dir and a 0600 config.json a device did not hav
   const cfg = JSON.parse(readFileSync(cfgPath, "utf8")) as { token: string; ingestUrl: string; deviceId: string };
   assert.deepEqual(cfg, { token: "tok-1", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev-1" });
   assert.ok(existsSync(join(dataDir, "policy.json")));
+});
+
+test("browser authorization opens Trinity and waits until approval before saving credentials", async () => {
+  const parent = tmpParentDir();
+  const dataDir = join(parent, "cursor");
+  const opened: string[] = [];
+  const shownCodes: string[] = [];
+  let exchanges = 0;
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (url: string | URL) => {
+    const href = String(url);
+    if (href.endsWith("/api/v1/devices/authorize/start")) {
+      return Response.json({
+        deviceCode: "device-secret",
+        verificationUrl: "https://app.usetrinity.ai/?device_request=request-id",
+        verificationCode: "A1B2-C3D4",
+        expiresInSeconds: 600,
+        intervalSeconds: 2,
+      });
+    }
+    if (href.endsWith("/api/v1/devices/authorize/exchange")) {
+      exchanges++;
+      return exchanges === 1
+        ? Response.json({ status: "pending" }, { status: 202 })
+        : Response.json({ token: "tok-browser", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev-browser" });
+    }
+    if (href.endsWith("/api/v1/ingest/policy")) {
+      return Response.json({ etag: "policy-browser", ttlSeconds: 900, captureLevel: "metadata", workspaces: [] });
+    }
+    throw new Error(`unexpected fetch: ${href}`);
+  }) as typeof fetch;
+
+  try {
+    await authorizeCursor({
+      baseUrl: "https://api.usetrinity.ai",
+      dataDir,
+      deviceName: "Cursor on test",
+      openURL: (url) => opened.push(url),
+      showVerificationCode: (code) => shownCodes.push(code),
+      wait: async () => undefined,
+    });
+  } finally {
+    globalThis.fetch = original;
+  }
+
+  assert.deepEqual(opened, ["https://app.usetrinity.ai/?device_request=request-id"]);
+  assert.deepEqual(shownCodes, ["A1B2-C3D4"]);
+  assert.equal(exchanges, 2);
+  const cfg = JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as { token: string; deviceId: string };
+  assert.deepEqual(cfg, { token: "tok-browser", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev-browser" });
+});
+
+test("browser authorization rejects a verification URL outside Trinity", async () => {
+  const parent = tmpParentDir();
+  const original = globalThis.fetch;
+  globalThis.fetch = (async () => Response.json({
+    deviceCode: "device-secret",
+    verificationUrl: "https://attacker.example/?device_request=request-id",
+    verificationCode: "A1B2-C3D4",
+    expiresInSeconds: 600,
+    intervalSeconds: 2,
+  })) as typeof fetch;
+  try {
+    await assert.rejects(
+      authorizeCursor({ baseUrl: "https://api.usetrinity.ai", dataDir: join(parent, "cursor"), deviceName: "Cursor" }),
+      /untrusted verification URL/,
+    );
+  } finally {
+    globalThis.fetch = original;
+  }
 });
 
 test("connect is idempotent: reconnecting re-secures permissions on an already-existing dir", async () => {
@@ -87,10 +150,6 @@ test("connect is idempotent: reconnecting re-secures permissions on an already-e
   }
 });
 
-// The credential home PROVEN, not assumed: this is the same dataDir
-// resolution cursorDialect.dataDir performs (TRINITY_CAPTURE_DATA override),
-// and a hook invocation using that exact env reads the connected device
-// back successfully.
 test("the data directory connect writes to is ready for cursor-hook.js", async () => {
   const parent = tmpParentDir();
   const dataDir = join(parent, "cursor");
@@ -108,10 +167,6 @@ test("the data directory connect writes to is ready for cursor-hook.js", async (
   assert.ok(existsSync(join(dataDir, "policy.json")));
 });
 
-// Uninstall: nothing outside the plugin's own directory tree is written by
-// the plugin or the connect flow, so removing the plugin directory itself
-// leaves the hooks manifest self-contained — no separate cleanup step, no
-// stray file elsewhere referencing the removed plugin.
 test("uninstall: the packaged plugin directory is self-contained (hooks.json references only files beneath it)", () => {
   const pluginDir = join(process.cwd(), "cursor");
   const hooksManifest = JSON.parse(readFileSync(join(pluginDir, "hooks", "hooks.json"), "utf8")) as {
@@ -122,10 +177,6 @@ test("uninstall: the packaged plugin directory is self-contained (hooks.json ref
       assert.match(entry.command, /\$\{CURSOR_PLUGIN_ROOT\}\/dist\//, `${event}'s command must reference a file beneath the plugin's own root, not an absolute or external path`);
     }
   }
-  // Simulating uninstall (rm -rf the plugin dir) leaves nothing else on
-  // disk referencing it — the only artifact outside cursor/ is the
-  // repo-root marketplace manifest naming the plugin by relative path, not
-  // by anything inside its dist.
   const marketplace = JSON.parse(readFileSync(join(process.cwd(), ".cursor-plugin", "marketplace.json"), "utf8")) as {
     plugins: { source: string }[];
   };
@@ -143,17 +194,11 @@ test("uninstall leaves the connected device's own credential directory untouched
   }
   assert.ok(existsSync(join(dataDir, "config.json")));
 
-  // "Uninstalling" the plugin means removing its packaged directory, never
-  // this data directory — they are deliberately disjoint (Application
-  // Support/XDG state vs. the plugin install location), so a reinstall +
-  // reconnect is the only way credentials are ever cleared. Simulated
-  // against a disposable copy of the plugin tree — never the committed
-  // cursor/ directory itself.
   const pluginCopy = join(parent, "installed-plugin");
   cpSync(join(process.cwd(), "cursor"), pluginCopy, { recursive: true });
   assert.ok(existsSync(join(pluginCopy, "dist", "cursor-hook.js")));
 
-  rmSync(pluginCopy, { recursive: true, force: true }); // the uninstall itself
+  rmSync(pluginCopy, { recursive: true, force: true });
 
   assert.ok(!existsSync(pluginCopy), "the simulated plugin install must be gone");
   assert.ok(existsSync(join(dataDir, "config.json")), "removing plugin files must never touch the separate data directory");

@@ -1,8 +1,8 @@
 # Agent instructions
 
-This repository contains Trinity's installable coding-agent capture clients. It is
-private today but should remain safe to open-source later: do not add credentials,
-customer data, internal infrastructure details, or proprietary dependencies.
+This public repository contains Trinity's installable coding-agent capture clients.
+Do not add credentials, customer data, internal infrastructure details, or proprietary
+dependencies.
 
 `AGENTS.md` and `CLAUDE.md` are byte-identical copies of this file. Edit one, copy it
 over the other.

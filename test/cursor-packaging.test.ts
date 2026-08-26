@@ -1,8 +1,3 @@
-// C2 acceptance's Cursor twin: the COMMITTED plugin build at cursor/dist/ —
-// the exact files an installed plugin executes — runs under the
-// CURSOR_PLUGIN_ROOT + TRINITY_CAPTURE_DATA env contract with a real
-// captured hook stdin. Not the dist-test compilation the other suites
-// import; if the committed output is stale or missing, these fail.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -33,8 +28,6 @@ function initRepo(remote: string): string {
   return dir;
 }
 
-// Mirrors exactly what cursor/hooks/hooks.json's command line does:
-// `node ${CURSOR_PLUGIN_ROOT}/dist/cursor-hook.js <event>`.
 function runHookBinary(dataDir: string, event: string, stdin: string): void {
   execFileSync("node", [hookBin, event], {
     input: stdin,
@@ -47,13 +40,6 @@ test("the committed hook and connect binaries exist where hooks.json / the READM
   assert.ok(existsSync(connectBin), `${connectBin} is missing — run pnpm build:plugin-cursor and commit the output`);
 });
 
-// Regression guard for a real bug: tsconfig.plugin-cursor.json and
-// tsconfig.plugin.json once both used a whole-tree "src/**/*.ts" include,
-// so building either product's dist pulled in every product's entrypoint —
-// cursor/dist shipped claude-hook.js, claude-code/dist shipped
-// cursor-hook.js/cursor-connect.js. Each tsconfig now lists its own
-// product's entrypoint explicitly; connect.js legitimately stays in
-// cursor/dist because cursor-connect.ts genuinely imports its exchange().
 test("cursor/dist never ships another product's entrypoint", () => {
   const files = readdirSync(join(pluginRoot, "dist"));
   assert.ok(!files.includes("claude-hook.js"), "cursor/dist must not ship claude-hook.js — it is not a real dependency of any cursor source file");
@@ -135,9 +121,24 @@ test("cursor/.cursor-plugin/plugin.json names its hooks manifest and the committ
     name: string;
     version: string;
     hooks: string;
+    commands: string;
+    logo: string;
+    license: string;
   };
   assert.equal(pluginManifest.hooks, "hooks/hooks.json");
   assert.ok(existsSync(join(pluginRoot, pluginManifest.hooks)));
+  assert.equal(pluginManifest.commands, "commands");
+  assert.ok(existsSync(join(pluginRoot, pluginManifest.commands, "trinity-connect.md")));
+  assert.equal(pluginManifest.license, "Apache-2.0");
+  assert.ok(existsSync(join(pluginRoot, pluginManifest.logo)));
+});
+
+test("the connect command locates its installed plugin without relying on hook-only environment", () => {
+  const command = readFileSync(join(pluginRoot, "commands", "trinity-connect.md"), "utf8");
+  assert.doesNotMatch(command, /CURSOR_PLUGIN_ROOT/);
+  assert.match(command, /\.cursor\/plugins/);
+  assert.match(command, /\.cursor-plugin\/plugin\.json/);
+  assert.match(command, /dist\/cursor-connect\.js/);
 });
 
 test("the repo-root .cursor-plugin/marketplace.json names trinity-capture at the packaged cursor plugin dir", () => {

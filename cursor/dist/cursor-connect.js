@@ -7,6 +7,7 @@ import { exchange } from "./connect.js";
 import { saveConfig } from "./config.js";
 import { isPolicyFresh } from "./gate.js";
 import { refreshPolicy } from "./send.js";
+import { exchangeDeviceAuthorization, openBrowserURL, startDeviceAuthorization, wait } from "./device-authorization.js";
 const DEFAULT_BASE_URL = "https://api.usetrinity.ai";
 const MIN_NODE_MAJOR = 20;
 function securePosixMode(path, mode) {
@@ -16,6 +17,9 @@ function securePosixMode(path, mode) {
 }
 export async function connectCursor(baseUrl, code, dataDir) {
     const cfg = await exchange(baseUrl, code);
+    await saveCursorConnection(dataDir, cfg);
+}
+async function saveCursorConnection(dataDir, cfg) {
     mkdirSync(dataDir, { recursive: true, mode: 0o700 });
     securePosixMode(dataDir, 0o700);
     saveConfig(dataDir, cfg);
@@ -24,6 +28,29 @@ export async function connectCursor(baseUrl, code, dataDir) {
     if (!isPolicyFresh(policy, Date.now())) {
         throw new Error("Trinity paired the device, but capture policy could not be synced. Run the connect command again.");
     }
+}
+export async function authorizeCursor(options) {
+    const authorization = await startDeviceAuthorization(options.baseUrl, options.deviceName);
+    const openURL = options.openURL ?? ((url) => {
+        if (!openBrowserURL(url))
+            console.log(`Open this link to connect Cursor: ${url}`);
+    });
+    const pause = options.wait ?? wait;
+    const showVerificationCode = options.showVerificationCode ?? ((code) => {
+        console.log(`Confirm code ${code} in the Trinity browser tab.`);
+    });
+    showVerificationCode(authorization.verificationCode);
+    openURL(authorization.verificationURL);
+    const expiresAt = Date.now() + authorization.expiresInSeconds * 1000;
+    while (Date.now() < expiresAt) {
+        const exchange = await exchangeDeviceAuthorization(options.baseUrl, authorization.deviceCode);
+        if (exchange.status === "connected") {
+            await saveCursorConnection(options.dataDir, exchange.config);
+            return;
+        }
+        await pause(authorization.intervalSeconds * 1000);
+    }
+    throw new Error("This Trinity authorization expired. Run /trinity-connect again.");
 }
 async function main() {
     const nodeMajorVersion = Number(process.versions.node.split(".")[0]);
@@ -41,13 +68,14 @@ async function main() {
     }
     const baseUrl = process.env.TRINITY_BASE_URL ?? DEFAULT_BASE_URL;
     const code = process.argv[2]?.trim() ?? "";
-    if (code === "") {
-        console.error("No pairing code provided. Usage: node cursor-connect.js <pairing-code>");
-        process.exitCode = 1;
-        return;
-    }
     try {
-        await connectCursor(baseUrl, code, dataDir);
+        if (code === "") {
+            console.log("Opening Trinity to approve this Cursor connection…");
+            await authorizeCursor({ baseUrl, dataDir, deviceName: "Cursor" });
+        }
+        else {
+            await connectCursor(baseUrl, code, dataDir);
+        }
         console.log("Trinity connected. This device now captures sessions for allowlisted repositories.");
     }
     catch (err) {
