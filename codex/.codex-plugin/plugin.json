@@ -1,7 +1,7 @@
 {
   "name": "trinity-capture",
   "description": "Captures Codex App and CLI sessions into Trinity for allowlisted repositories.",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "skills": "./skills/",
   "author": {
     "name": "Trinity",

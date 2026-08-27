@@ -1,14 +1,3 @@
-// The Codex CONNECT skill's entrypoint (spec's global constraints, finding 3):
-// exchanges a pairing code and writes the resulting DeviceConfig to a PENDING
-// file under $CODEX_HOME/trinity-capture/, mode 0600 — never directly into
-// PLUGIN_DATA. C2.0 empirically proved a Codex plugin SKILL's shell command
-// runs without PLUGIN_DATA (only hook COMMANDS get it), so this script cannot
-// write the real device config itself. codex-hook.ts's PostToolUse handler
-// promotes the pending record into PLUGIN_DATA atomically the next time a
-// hook command runs, and removes the pending file. This script's own
-// --status mode is the "read-back/status check" the skill uses to confirm
-// that happened: it can never see PLUGIN_DATA either, so it reads the
-// pending file's absence as the promotion signal instead.
 import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -27,6 +16,14 @@ const TRINITY_INGEST_ORIGINS = new Set([
   "https://api.usetrinity.ai",
   "https://api-staging.usetrinity.ai",
 ]);
+
+type ConnectionDestination = {
+  readonly home: string;
+  readonly pluginDataDir: string | undefined;
+  readonly baseUrl: string;
+};
+
+export type ConnectionStatus = "pending" | "connected" | "unpaired";
 
 // Exported so codex-hook.ts's promotion step and this suite's tests resolve
 // the exact same home and pending path.
@@ -106,10 +103,21 @@ export async function promotePendingConfig(
   unlinkSync(pending);
 }
 
-export function connectionStatus(home: string): "pending" | "connected" | "unpaired" {
+export function connectionStatus(home: string): ConnectionStatus {
   if (existsSync(pendingConfigPath(home))) return "pending";
   if (existsSync(confirmedConfigPath(home))) return "connected";
   return "unpaired";
+}
+
+export async function recordConnection(
+  destination: ConnectionDestination,
+  cfg: DeviceConfig,
+): Promise<ConnectionStatus> {
+  writePendingConfig(destination.home, cfg);
+  if (destination.pluginDataDir !== undefined) {
+    await promotePendingConfig(destination.home, destination.pluginDataDir, destination.baseUrl);
+  }
+  return connectionStatus(destination.home);
 }
 
 async function main(): Promise<void> {
@@ -146,8 +154,15 @@ async function main(): Promise<void> {
   const baseUrl = process.env.TRINITY_BASE_URL ?? DEFAULT_BASE_URL;
   try {
     const cfg = await exchange(baseUrl, arg);
-    writePendingConfig(home, cfg);
-    console.log("Trinity pairing recorded. Run /trinity-connect --status next to confirm it landed.");
+    const status = await recordConnection(
+      { home, pluginDataDir: process.env.TRINITY_CAPTURE_DATA, baseUrl },
+      cfg,
+    );
+    if (status === "connected") {
+      console.log("Trinity connected. This device now captures sessions for allowlisted repositories.");
+    } else {
+      console.log("Trinity pairing recorded. Run /trinity-connect --status next to confirm it landed.");
+    }
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err));
     process.exitCode = 1;

@@ -1,14 +1,3 @@
-// The Codex CONNECT skill's entrypoint (spec's global constraints, finding 3):
-// exchanges a pairing code and writes the resulting DeviceConfig to a PENDING
-// file under $CODEX_HOME/trinity-capture/, mode 0600 — never directly into
-// PLUGIN_DATA. C2.0 empirically proved a Codex plugin SKILL's shell command
-// runs without PLUGIN_DATA (only hook COMMANDS get it), so this script cannot
-// write the real device config itself. codex-hook.ts's PostToolUse handler
-// promotes the pending record into PLUGIN_DATA atomically the next time a
-// hook command runs, and removes the pending file. This script's own
-// --status mode is the "read-back/status check" the skill uses to confirm
-// that happened: it can never see PLUGIN_DATA either, so it reads the
-// pending file's absence as the promotion signal instead.
 import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -109,6 +98,13 @@ export function connectionStatus(home) {
         return "connected";
     return "unpaired";
 }
+export async function recordConnection(destination, cfg) {
+    writePendingConfig(destination.home, cfg);
+    if (destination.pluginDataDir !== undefined) {
+        await promotePendingConfig(destination.home, destination.pluginDataDir, destination.baseUrl);
+    }
+    return connectionStatus(destination.home);
+}
 async function main() {
     if (!supportsNodeVersion(process.versions.node)) {
         console.error(`trinity-connect requires Node >= 20 (found ${process.version}).`);
@@ -139,8 +135,13 @@ async function main() {
     const baseUrl = process.env.TRINITY_BASE_URL ?? DEFAULT_BASE_URL;
     try {
         const cfg = await exchange(baseUrl, arg);
-        writePendingConfig(home, cfg);
-        console.log("Trinity pairing recorded. Run /trinity-connect --status next to confirm it landed.");
+        const status = await recordConnection({ home, pluginDataDir: process.env.TRINITY_CAPTURE_DATA, baseUrl }, cfg);
+        if (status === "connected") {
+            console.log("Trinity connected. This device now captures sessions for allowlisted repositories.");
+        }
+        else {
+            console.log("Trinity pairing recorded. Run /trinity-connect --status next to confirm it landed.");
+        }
     }
     catch (err) {
         console.error(err instanceof Error ? err.message : String(err));
