@@ -26,7 +26,7 @@ Cursor waits for the browser approval, stores its credential in the operating sy
 
 #### Claude Desktop
 
-1. Open [Trinity](https://claude.com/plugins/trinity-capture) and select **Install**.
+1. Open the [Claude Plugin Directory](https://claude.com/plugins), find **Trinity**, and select **Install**.
 2. Generate a Claude Code pairing code from Trinity, then run `/trinity:connect <code>`.
 3. Exit Claude Code and start a new session in an enabled repository.
 
