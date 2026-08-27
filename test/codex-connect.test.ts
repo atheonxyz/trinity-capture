@@ -6,7 +6,7 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { exchange } from "../src/connect.js";
-import { codexHome, pendingConfigPath, promotePendingConfig, writePendingConfig } from "../src/codex-connect.js";
+import { codexHome, pendingConfigPath, promotePendingConfig, recordConnection, writePendingConfig } from "../src/codex-connect.js";
 import { loadConfig, savePolicy } from "../src/config.js";
 import type { DeviceConfig } from "../src/config.js";
 
@@ -96,6 +96,19 @@ test("the full connect flow: exchange against a stub server, write pending, prom
 
   const readBack = loadConfig(pluginData);
   assert.deepEqual(readBack, cfg, "read-back through config.ts's own loadConfig must succeed");
+});
+
+test("recordConnection promotes immediately when the public skill supplies plugin data", async () => {
+  const home = tmpHome();
+  const pluginData = tmpPluginData();
+  const cfg: DeviceConfig = { token: "tok-public", ingestUrl: "https://api.example/api/v1/ingest/batches", deviceId: "dev-public" };
+  saveFreshPolicy(pluginData);
+
+  const status = await recordConnection({ home, pluginDataDir: pluginData, baseUrl: "https://api.example" }, cfg);
+
+  assert.equal(status, "connected");
+  assert.deepEqual(loadConfig(pluginData), cfg);
+  assert.ok(!existsSync(pendingConfigPath(home)));
 });
 
 test("promotion rejects a pending config for an untrusted ingest origin", async () => {

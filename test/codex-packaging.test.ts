@@ -234,6 +234,8 @@ test("uninstall: hooks.json and the connect skill reference nothing outside the 
   const skillRaw = readFileSync(skillPath, "utf8");
   assert.match(skillRaw, /codex plugin list --json/, "the connect skill must resolve its installed path through Codex");
   assert.match(skillRaw, /`trinity-capture`/, "the connect skill must resolve the installed Trinity plugin by name");
-  assert.doesNotMatch(skillRaw, /trinity-capture@trinity/, "the connect skill must work from the public directory or a repo marketplace");
+  assert.match(skillRaw, /codex plugin marketplace add https:\/\/github\.com\/atheonxyz\/trinity-capture\.git/);
+  assert.match(skillRaw, /codex plugin add trinity-capture@trinity/);
+  assert.match(skillRaw, /TRINITY_CAPTURE_DATA/);
   assert.doesNotMatch(skillRaw, /\/Users\/|\/home\//, "the connect skill must not embed an absolute local path");
 });
