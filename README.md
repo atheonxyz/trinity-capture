@@ -27,16 +27,16 @@ Cursor waits for the browser approval, stores its credential in the operating sy
 #### Claude Desktop
 
 1. Open the [Claude Plugin Directory](https://claude.com/plugins), find **Trinity**, and select **Install**.
-2. Generate a Claude Code pairing code from Trinity, then run `/trinity:connect <code>`.
-3. Exit Claude Code and start a new session in an enabled repository.
+2. Start a new Claude Code session so the plugin is available.
+3. Generate a Claude Code pairing code from Trinity, then run `/trinity:connect <code>`.
+4. Exit Claude Code and start a new session in an enabled repository.
 
 #### Claude CLI
 
-1. Run `claude plugin marketplace add https://github.com/atheonxyz/trinity-capture.git` in your terminal.
-2. Run `claude plugin install trinity-capture@trinity`.
-3. Start Claude Code.
-4. Generate a Claude Code pairing code from Trinity, then run `/trinity:connect <code>`.
-5. Exit Claude Code and start a new session in an enabled repository.
+1. Run `claude plugin install trinity-capture@claude-plugins-official` in your terminal.
+2. Start Claude Code.
+3. Generate a Claude Code pairing code from Trinity, then run `/trinity:connect <code>`.
+4. Exit Claude Code and start a new session in an enabled repository.
 
 ### Codex
 
@@ -49,9 +49,9 @@ Cursor waits for the browser approval, stores its credential in the operating sy
 
 #### Codex CLI
 
-1. Run `codex plugin marketplace add https://github.com/atheonxyz/trinity-capture.git`.
-2. Run `codex plugin add trinity-capture@trinity`.
-3. Start Codex and approve the Trinity hooks when prompted.
+1. Start Codex and run `/plugins`.
+2. Find **Trinity**, select **Install**, then start a new Codex session.
+3. Approve the Trinity hooks when prompted.
 4. Generate a Codex pairing code from Trinity, then run `$trinity-connect <code>`.
 5. Start a new Codex session in an enabled repository.
 
