@@ -9,7 +9,7 @@
     {
       "name": "trinity",
       "description": "Captures Claude Code sessions into Trinity for allowlisted repositories.",
-      "version": "0.2.3",
+      "version": "0.2.4",
       "source": "./claude-code"
     }
   ]

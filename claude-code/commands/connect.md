@@ -1,5 +1,5 @@
 ---
-description: Pair this Claude Code installation with Trinity capture
+description: Pair this Claude Code installation with Trinity
 argument-hint: [pairing-code]
 arguments: [pairing_code]
 disable-model-invocation: true
