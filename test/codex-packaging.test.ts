@@ -176,7 +176,8 @@ test("the Codex package exposes public-directory metadata and assets", () => {
       readonly termsOfServiceURL?: string;
       readonly defaultPrompt?: readonly string[];
       readonly logo?: string;
-      readonly screenshots?: readonly string[];
+      readonly composerIcon?: string;
+      readonly screenshots?: unknown;
     };
   };
 
@@ -193,10 +194,9 @@ test("the Codex package exposes public-directory metadata and assets", () => {
   assert.ok(pluginManifest.interface?.defaultPrompt?.length);
   assert.ok(pluginManifest.interface?.logo);
   assert.ok(existsSync(resolve(process.cwd(), "codex", pluginManifest.interface?.logo ?? "")));
-  assert.ok(pluginManifest.interface?.screenshots?.length);
-  for (const screenshot of pluginManifest.interface?.screenshots ?? []) {
-    assert.ok(existsSync(resolve(process.cwd(), "codex", screenshot)));
-  }
+  assert.ok(pluginManifest.interface?.composerIcon);
+  assert.ok(existsSync(resolve(process.cwd(), "codex", pluginManifest.interface?.composerIcon ?? "")));
+  assert.equal(pluginManifest.interface?.screenshots, undefined);
 });
 
 test("status before pairing reports that this installation is not paired", () => {

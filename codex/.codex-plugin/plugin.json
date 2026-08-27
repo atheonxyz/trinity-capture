@@ -1,7 +1,7 @@
 {
   "name": "trinity-capture",
   "description": "Captures Codex App and CLI sessions into Trinity for allowlisted repositories.",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "skills": "./skills/",
   "author": {
     "name": "Trinity",
@@ -25,6 +25,6 @@
     "defaultPrompt": ["Connect Codex to Trinity."],
     "brandColor": "#151517",
     "logo": "./assets/trinity.svg",
-    "screenshots": ["./assets/setup.png"]
+    "composerIcon": "./assets/trinity.svg"
   }
 }
