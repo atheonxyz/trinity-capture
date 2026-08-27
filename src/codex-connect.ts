@@ -17,14 +17,6 @@ const TRINITY_INGEST_ORIGINS = new Set([
   "https://api-staging.usetrinity.ai",
 ]);
 
-type ConnectionDestination = {
-  readonly home: string;
-  readonly pluginDataDir: string | undefined;
-  readonly baseUrl: string;
-};
-
-export type ConnectionStatus = "pending" | "connected" | "unpaired";
-
 // Exported so codex-hook.ts's promotion step and this suite's tests resolve
 // the exact same home and pending path.
 export function codexHome(env: NodeJS.ProcessEnv): string {
@@ -103,21 +95,10 @@ export async function promotePendingConfig(
   unlinkSync(pending);
 }
 
-export function connectionStatus(home: string): ConnectionStatus {
+export function connectionStatus(home: string): "pending" | "connected" | "unpaired" {
   if (existsSync(pendingConfigPath(home))) return "pending";
   if (existsSync(confirmedConfigPath(home))) return "connected";
   return "unpaired";
-}
-
-export async function recordConnection(
-  destination: ConnectionDestination,
-  cfg: DeviceConfig,
-): Promise<ConnectionStatus> {
-  writePendingConfig(destination.home, cfg);
-  if (destination.pluginDataDir !== undefined) {
-    await promotePendingConfig(destination.home, destination.pluginDataDir, destination.baseUrl);
-  }
-  return connectionStatus(destination.home);
 }
 
 async function main(): Promise<void> {
@@ -154,15 +135,8 @@ async function main(): Promise<void> {
   const baseUrl = process.env.TRINITY_BASE_URL ?? DEFAULT_BASE_URL;
   try {
     const cfg = await exchange(baseUrl, arg);
-    const status = await recordConnection(
-      { home, pluginDataDir: process.env.TRINITY_CAPTURE_DATA, baseUrl },
-      cfg,
-    );
-    if (status === "connected") {
-      console.log("Trinity connected. This device now captures sessions for allowlisted repositories.");
-    } else {
-      console.log("Trinity pairing recorded. Run /trinity-connect --status next to confirm it landed.");
-    }
+    writePendingConfig(home, cfg);
+    console.log("Trinity pairing recorded. Run /trinity-connect --status next to confirm it landed.");
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err));
     process.exitCode = 1;
