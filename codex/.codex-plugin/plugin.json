@@ -1,7 +1,7 @@
 {
   "name": "trinity-capture",
   "description": "Captures Codex App and CLI sessions into Trinity for allowlisted repositories.",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "skills": "./skills/",
   "author": {
     "name": "Trinity",
@@ -13,7 +13,7 @@
   "license": "Apache-2.0",
   "keywords": ["coding sessions", "developer tools", "team context"],
   "interface": {
-    "displayName": "Trinity Capture",
+    "displayName": "Trinity",
     "shortDescription": "Capture Codex sessions in Trinity.",
     "longDescription": "Captures Codex App and CLI sessions for repositories enabled in Trinity. Unmatched repositories stay local. Requires Node.js 20 or newer.",
     "developerName": "Trinity",

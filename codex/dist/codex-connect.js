@@ -98,13 +98,6 @@ export function connectionStatus(home) {
         return "connected";
     return "unpaired";
 }
-export async function recordConnection(destination, cfg) {
-    writePendingConfig(destination.home, cfg);
-    if (destination.pluginDataDir !== undefined) {
-        await promotePendingConfig(destination.home, destination.pluginDataDir, destination.baseUrl);
-    }
-    return connectionStatus(destination.home);
-}
 async function main() {
     if (!supportsNodeVersion(process.versions.node)) {
         console.error(`trinity-connect requires Node >= 20 (found ${process.version}).`);
@@ -135,13 +128,8 @@ async function main() {
     const baseUrl = process.env.TRINITY_BASE_URL ?? DEFAULT_BASE_URL;
     try {
         const cfg = await exchange(baseUrl, arg);
-        const status = await recordConnection({ home, pluginDataDir: process.env.TRINITY_CAPTURE_DATA, baseUrl }, cfg);
-        if (status === "connected") {
-            console.log("Trinity connected. This device now captures sessions for allowlisted repositories.");
-        }
-        else {
-            console.log("Trinity pairing recorded. Run /trinity-connect --status next to confirm it landed.");
-        }
+        writePendingConfig(home, cfg);
+        console.log("Trinity pairing recorded. Run /trinity-connect --status next to confirm it landed.");
     }
     catch (err) {
         console.error(err instanceof Error ? err.message : String(err));

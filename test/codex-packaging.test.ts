@@ -156,7 +156,7 @@ test("the repo-root marketplace manifest names trinity-capture at the packaged c
   assert.equal(plugin.name, entry.name);
   assert.equal(plugin.skills, "./skills/", "plugin.json must expose the packaged connect skill");
   assert.equal(plugin.hooks, undefined, "Codex discovers the default hooks/hooks.json without a manifest override");
-  assert.equal(plugin.interface?.displayName, "Trinity Capture");
+  assert.equal(plugin.interface?.displayName, "Trinity");
   assert.ok(existsSync(join(sourceDir, "dist", "codex-hook.js")), "the marketplace entry points at a dir without the committed build");
 });
 
@@ -232,10 +232,7 @@ test("uninstall: hooks.json and the connect skill reference nothing outside the 
 
   const skillPath = join(process.cwd(), "codex", "skills", "trinity-connect", "SKILL.md");
   const skillRaw = readFileSync(skillPath, "utf8");
-  assert.match(skillRaw, /codex plugin list --json/, "the connect skill must resolve its installed path through Codex");
-  assert.match(skillRaw, /`trinity-capture`/, "the connect skill must resolve the installed Trinity plugin by name");
-  assert.match(skillRaw, /codex plugin marketplace add https:\/\/github\.com\/atheonxyz\/trinity-capture\.git/);
-  assert.match(skillRaw, /codex plugin add trinity-capture@trinity/);
-  assert.match(skillRaw, /TRINITY_CAPTURE_DATA/);
+  assert.match(skillRaw, /dist\/codex-connect\.js/);
+  assert.doesNotMatch(skillRaw, /codex plugin (?:list|marketplace|add)/);
   assert.doesNotMatch(skillRaw, /\/Users\/|\/home\//, "the connect skill must not embed an absolute local path");
 });
