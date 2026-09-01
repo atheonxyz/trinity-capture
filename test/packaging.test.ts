@@ -46,14 +46,17 @@ test("the committed hook binary exists where hooks.json points", () => {
   assert.ok(existsSync(hookBin), `${hookBin} is missing — run pnpm build:plugin and commit the output`);
 });
 
-test("hook commands use path-safe exec form", () => {
+test("hook commands use the string form every host executes", () => {
   const manifest = JSON.parse(readFileSync(join(process.cwd(), "claude-code", "hooks", "hooks.json"), "utf8")) as {
     hooks: Record<string, { hooks: { command: string; args?: string[] }[] }[]>;
   };
   for (const [eventName, groups] of Object.entries(manifest.hooks)) {
     const handler = groups[0]?.hooks[0];
-    assert.equal(handler?.command, "node");
-    assert.deepEqual(handler?.args, ["${CLAUDE_PLUGIN_ROOT}/dist/claude-hook.js", eventName]);
+    // The desktop app runs only the documented string command; a split
+    // command+args pair degrades there to bare `node`, which swallows the
+    // hook stdin as a script and captures nothing.
+    assert.equal(handler?.command, `node "\${CLAUDE_PLUGIN_ROOT}/dist/claude-hook.js" ${eventName}`);
+    assert.equal(handler?.args, undefined);
   }
 });
 
