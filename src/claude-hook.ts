@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import type { Dialect } from "./hook-core.js";
 import { runHook } from "./hook-core.js";
 
@@ -58,15 +58,45 @@ function suppressConnectSession(dataDir: string, event: string, payload: Record<
   }
 }
 
-// Claude's hosts hand this plugin different data directories for the same
-// install (the CLI keys by marketplace, the desktop app by "inline"), so a
-// device paired on one surface would be invisible to the other. A provided
-// dir that holds config.json always wins; an unpaired one falls back to the
-// lexically first paired trinity-* sibling.
+// Claude's hosts key one install's data directory per surface as
+// "<plugin-name>-<source>" (marketplace name for the CLI, "inline" for the
+// desktop app), so a device paired on one surface would be invisible to the
+// other. A provided dir that holds a pairing always wins; an unpaired one
+// falls back to the lexically first paired sibling of the same plugin. The
+// name comes from this build's own manifest, never a spelled-out product
+// name, and a sibling qualifies only when its config carries the pairing
+// shape, so another plugin sharing a name prefix is never adopted.
+function hasPairing(dir: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(join(dir, "config.json"), "utf8"));
+    if (typeof parsed !== "object" || parsed === null) return false;
+    const cfg = parsed as Record<string, unknown>;
+    return typeof cfg.token === "string" && typeof cfg.ingestUrl === "string" && typeof cfg.deviceId === "string";
+  } catch (error) {
+    if (error instanceof Error) return false;
+    throw error;
+  }
+}
+
+function pluginNamePrefix(): string | null {
+  try {
+    const root = dirname(dirname(fileURLToPath(import.meta.url)));
+    const parsed: unknown = JSON.parse(readFileSync(join(root, ".claude-plugin", "plugin.json"), "utf8"));
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const name = (parsed as Record<string, unknown>).name;
+    return typeof name === "string" && name !== "" ? `${name}-` : null;
+  } catch (error) {
+    if (error instanceof Error) return null;
+    throw error;
+  }
+}
+
 function resolveDataDir(env: NodeJS.ProcessEnv): string | null {
   const provided = env.CLAUDE_PLUGIN_DATA;
   if (!provided) return null;
-  if (existsSync(join(provided, "config.json"))) return provided;
+  if (hasPairing(provided)) return provided;
+  const prefix = pluginNamePrefix();
+  if (prefix === null) return provided;
   const parent = dirname(provided);
   let siblings: string[];
   try {
@@ -76,8 +106,8 @@ function resolveDataDir(env: NodeJS.ProcessEnv): string | null {
     throw error;
   }
   const paired = siblings
-    .filter((name) => name.startsWith("trinity-") && name !== basename(provided))
-    .filter((name) => existsSync(join(parent, name, "config.json")))
+    .filter((name) => name.startsWith(prefix) && name !== basename(provided))
+    .filter((name) => hasPairing(join(parent, name)))
     .sort();
   return paired.length > 0 ? join(parent, paired[0]) : provided;
 }
