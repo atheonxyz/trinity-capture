@@ -6,7 +6,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { saveConfig, savePolicy } from "../src/config.js";
@@ -92,6 +92,31 @@ test("committed binary, authorized + allowlisted: appends the SessionStart pair"
     .map((f) => (JSON.parse(readFileSync(join(dataDir, "outbox", f), "utf8")) as { kind: string }).kind)
     .sort();
   assert.deepEqual(kinds, ["SessionStart", "workspace.observed"]);
+});
+
+test("committed binary falls back to a paired sibling data directory", () => {
+  // The desktop app keys the data dir "trinity-inline" while the CLI keys
+  // "trinity-trinity"; a device paired on one surface must capture on both.
+  const parent = mkdtempSync(join(tmpdir(), "trinity-pkg-split-"));
+  const paired = join(parent, "trinity-trinity");
+  const provided = join(parent, "trinity-inline");
+  mkdirSync(paired, { recursive: true });
+  mkdirSync(provided, { recursive: true });
+  saveConfig(paired, { token: "tok", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev1" });
+  savePolicy(paired, {
+    etag: "e1",
+    fetchedAt: Date.now(),
+    ttlSeconds: 900,
+    captureLevel: "metadata",
+    workspaces: [{ canonicalRepo: "github.com/acme/widgets", aliases: [], route: "project:p1" }],
+  });
+  const repo = initRepo("git@github.com:acme/widgets.git");
+  const stdin = JSON.parse(readFileSync(dialectStdinPath, "utf8")) as Record<string, unknown>;
+  stdin.cwd = repo;
+  runHookBinary(provided, "SessionStart", JSON.stringify(stdin));
+
+  assert.ok(!existsSync(join(provided, "outbox")), "the unpaired provided dir takes no writes");
+  assert.equal(readdirSync(join(paired, "outbox")).length, 2, "events land in the paired sibling");
 });
 
 test("committed binary omits the complete connect-command session from capture", () => {

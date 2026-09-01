@@ -1,5 +1,5 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { runHook } from "./hook-core.js";
 function stringField(payload, key) {
@@ -56,6 +56,33 @@ function suppressConnectSession(dataDir, event, payload) {
         throw error;
     }
 }
+// Claude's hosts hand this plugin different data directories for the same
+// install (the CLI keys by marketplace, the desktop app by "inline"), so a
+// device paired on one surface would be invisible to the other. A provided
+// dir that holds config.json always wins; an unpaired one falls back to the
+// lexically first paired trinity-* sibling.
+function resolveDataDir(env) {
+    const provided = env.CLAUDE_PLUGIN_DATA;
+    if (!provided)
+        return null;
+    if (existsSync(join(provided, "config.json")))
+        return provided;
+    const parent = dirname(provided);
+    let siblings;
+    try {
+        siblings = readdirSync(parent);
+    }
+    catch (error) {
+        if (error instanceof Error)
+            return provided;
+        throw error;
+    }
+    const paired = siblings
+        .filter((name) => name.startsWith("trinity-") && name !== basename(provided))
+        .filter((name) => existsSync(join(parent, name, "config.json")))
+        .sort();
+    return paired.length > 0 ? join(parent, paired[0]) : provided;
+}
 export const claudeCodeDialect = {
     tool: "claude_code",
     sessionId: (_event, payload) => stringField(payload, "session_id"),
@@ -63,16 +90,15 @@ export const claudeCodeDialect = {
     vendorTurnId: (_event, payload) => stringField(payload, "prompt_id"),
     isPromptSubmit: (event) => event === "UserPromptSubmit",
     isSessionStart: (event) => event === "SessionStart",
-    // SessionEnd is the one hook hooks.json runs synchronously (no "async":
-    // true, unlike its four siblings) — it must stay append-only and
-    // timeout-bounded, so it's the one event that never drains.
+    // SessionEnd fires while the host tears the session down, so it stays
+    // append-only; every other event drains within the inline budget.
     drainsOn: (event) => event !== "SessionEnd",
     suppress: suppressConnectSession,
     allow: (event) => [...ALLOW_EVERY_EVENT, ...(ALLOW_PER_EVENT[event] ?? [])],
-    // Async-capable: four of Claude's five hooks run detached ("async": true
-    // in hooks.json), so the open multi-batch drain in hook-core is fine.
-    drainInline: false,
-    dataDir: (env) => env.CLAUDE_PLUGIN_DATA ?? null,
+    // Every hook runs synchronously — the desktop app silently skips entries
+    // declared "async": true — so drains are budgeted inline, like codex's.
+    drainInline: true,
+    dataDir: resolveDataDir,
 };
 async function cli() {
     const eventName = process.argv[2];
