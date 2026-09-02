@@ -62,18 +62,22 @@ function suppressConnectSession(dataDir: string, event: string, payload: Record<
 // "<plugin-name>-<source>" (marketplace name for the CLI, "inline" for the
 // desktop app), so a device paired on one surface would be invisible to the
 // other. A provided dir that holds a pairing always wins; an unpaired one
-// falls back to the lexically first paired sibling of the same plugin. The
-// name comes from this build's own manifest, never a spelled-out product
-// name, and a sibling qualifies only when its config carries the pairing
-// shape, so another plugin sharing a name prefix is never adopted.
-function hasPairing(dir: string): boolean {
+// falls back to a paired sibling of the same plugin, whose name prefix comes
+// from this build's own manifest rather than a spelled-out product name.
+// Selection is by IDENTITY, never by sort order: the chosen directory
+// supplies the token and the allowlist policy, so picking between siblings
+// that disagree would file one account's prompts under another's device.
+// Siblings holding the same pairing are one device reached by two names and
+// stay usable; anything else is ambiguous and captures nowhere.
+function pairingIdentity(dir: string): string | null {
   try {
     const parsed: unknown = JSON.parse(readFileSync(join(dir, "config.json"), "utf8"));
-    if (typeof parsed !== "object" || parsed === null) return false;
-    const cfg = parsed as Record<string, unknown>;
-    return typeof cfg.token === "string" && typeof cfg.ingestUrl === "string" && typeof cfg.deviceId === "string";
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const { deviceId, ingestUrl, token } = parsed as Record<string, unknown>;
+    if (typeof deviceId !== "string" || typeof ingestUrl !== "string" || typeof token !== "string") return null;
+    return JSON.stringify([deviceId, ingestUrl, token]);
   } catch (error) {
-    if (error instanceof Error) return false;
+    if (error instanceof Error) return null;
     throw error;
   }
 }
@@ -94,7 +98,7 @@ function pluginNamePrefix(): string | null {
 function resolveDataDir(env: NodeJS.ProcessEnv): string | null {
   const provided = env.CLAUDE_PLUGIN_DATA;
   if (!provided) return null;
-  if (hasPairing(provided)) return provided;
+  if (pairingIdentity(provided) !== null) return provided;
   const prefix = pluginNamePrefix();
   if (prefix === null) return provided;
   const parent = dirname(provided);
@@ -105,11 +109,14 @@ function resolveDataDir(env: NodeJS.ProcessEnv): string | null {
     if (error instanceof Error) return provided;
     throw error;
   }
-  const paired = siblings
+  const candidates = siblings
     .filter((name) => name.startsWith(prefix) && name !== basename(provided))
-    .filter((name) => hasPairing(join(parent, name)))
-    .sort();
-  return paired.length > 0 ? join(parent, paired[0]) : provided;
+    .sort()
+    .map((name) => ({ dir: join(parent, name), identity: pairingIdentity(join(parent, name)) }))
+    .filter((candidate) => candidate.identity !== null);
+  if (candidates.length === 0) return provided;
+  if (candidates.some((candidate) => candidate.identity !== candidates[0].identity)) return null;
+  return candidates[0].dir;
 }
 
 export const claudeCodeDialect: Dialect = {
