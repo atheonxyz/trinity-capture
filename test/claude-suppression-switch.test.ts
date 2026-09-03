@@ -140,6 +140,18 @@ test("a prefixed non-directory does not suppress Claude capture", async (t) => {
   assert.equal(outboxFiles(f.dirs.cli).length, 1);
 });
 
+test("a non-directory current path does not suppress Claude capture", async (t) => {
+  const f = await fixture(t);
+  const broken = join(f.root, "trinity-broken");
+  writeFileSync(broken, "not a plugin directory");
+  f.pair(f.dirs.cli);
+
+  await f.run(broken, "UserPromptSubmit", { prompt: "ordinary work" });
+
+  assert.deepEqual(f.requests, ["/api/v1/ingest/batches"]);
+  assert.equal(outboxFiles(f.dirs.cli).length, 1);
+});
+
 test("a differently paired Claude sibling does not suppress capture", async (t) => {
   const f = await fixture(t);
   await f.run(f.dirs.inline, "UserPromptSubmit", { prompt: "[Trinity setup]\nSETUP_SECRET" });
@@ -159,6 +171,21 @@ test("a stale unpaired Claude sibling does not suppress capture", async (t) => {
   const marker = join(f.dirs.inline, "suppressed-sessions", "claude_code-setup");
   const stale = new Date(Date.now() - 60 * 60_000);
   utimesSync(marker, stale, stale);
+  f.pair(f.dirs.cli);
+
+  await f.run(f.dirs.cli, "UserPromptSubmit", { prompt: "ordinary work" });
+
+  assert.deepEqual(f.requests, ["/api/v1/ingest/batches"]);
+  assert.equal(outboxFiles(f.dirs.cli).length, 1);
+  assert.deepEqual(outboxFiles(f.dirs.inline), []);
+});
+
+test("a future-dated unpaired Claude sibling does not suppress capture", async (t) => {
+  const f = await fixture(t);
+  await f.run(f.dirs.inline, "UserPromptSubmit", { prompt: "[Trinity setup]\nSETUP_SECRET" });
+  const marker = join(f.dirs.inline, "suppressed-sessions", "claude_code-setup");
+  const future = new Date(Date.now() + 60 * 60_000);
+  utimesSync(marker, future, future);
   f.pair(f.dirs.cli);
 
   await f.run(f.dirs.cli, "UserPromptSubmit", { prompt: "ordinary work" });

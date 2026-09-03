@@ -134,10 +134,10 @@ function suppressionDirs(
     const parent = dirname(provided);
     const identity = pairingIdentity(dataDir);
     const sessionId = stringField(payload, "session_id");
+    const entries = readdirSync(parent, { withFileTypes: true });
     return [...new Set([
-      provided,
       dataDir,
-      ...readdirSync(parent, { withFileTypes: true })
+      ...entries
         .filter((entry) => entry.isDirectory() && entry.name.startsWith(prefix))
         .map((entry) => join(parent, entry.name))
     ])].filter((dir) => {
@@ -146,7 +146,8 @@ function suppressionDirs(
       if (identity !== null && candidate === identity) return true;
       if (candidate !== null || sessionId === null) return false;
       try {
-        return Date.now() - statSync(suppressedSessionFile(dir, sessionId)).mtimeMs <= SETUP_MARKER_TRANSFER_WINDOW_MS;
+        const age = Date.now() - statSync(suppressedSessionFile(dir, sessionId)).mtimeMs;
+        return age >= 0 && age <= SETUP_MARKER_TRANSFER_WINDOW_MS;
       } catch (error) {
         if (error instanceof Error && "code" in error && error.code === "ENOENT") return false;
         return true;
