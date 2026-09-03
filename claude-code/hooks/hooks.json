@@ -3,14 +3,14 @@
     "SessionStart": [
       {
         "hooks": [
-          { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/dist/claude-hook.js", "SessionStart"], "async": true }
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/claude-hook.js\" SessionStart" }
         ]
       }
     ],
     "UserPromptSubmit": [
       {
         "hooks": [
-          { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/dist/claude-hook.js", "UserPromptSubmit"], "async": true }
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/claude-hook.js\" UserPromptSubmit" }
         ]
       }
     ],
@@ -18,21 +18,21 @@
       {
         "matcher": "*",
         "hooks": [
-          { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/dist/claude-hook.js", "PostToolUse"], "async": true }
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/claude-hook.js\" PostToolUse" }
         ]
       }
     ],
     "Stop": [
       {
         "hooks": [
-          { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/dist/claude-hook.js", "Stop"], "async": true }
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/claude-hook.js\" Stop" }
         ]
       }
     ],
     "SessionEnd": [
       {
         "hooks": [
-          { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/dist/claude-hook.js", "SessionEnd"] }
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/claude-hook.js\" SessionEnd" }
         ]
       }
     ]

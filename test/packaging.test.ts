@@ -6,7 +6,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { saveConfig, savePolicy } from "../src/config.js";
@@ -46,14 +46,17 @@ test("the committed hook binary exists where hooks.json points", () => {
   assert.ok(existsSync(hookBin), `${hookBin} is missing — run pnpm build:plugin and commit the output`);
 });
 
-test("hook commands use path-safe exec form", () => {
+test("hook commands use the string form every host executes", () => {
   const manifest = JSON.parse(readFileSync(join(process.cwd(), "claude-code", "hooks", "hooks.json"), "utf8")) as {
     hooks: Record<string, { hooks: { command: string; args?: string[] }[] }[]>;
   };
   for (const [eventName, groups] of Object.entries(manifest.hooks)) {
     const handler = groups[0]?.hooks[0];
-    assert.equal(handler?.command, "node");
-    assert.deepEqual(handler?.args, ["${CLAUDE_PLUGIN_ROOT}/dist/claude-hook.js", eventName]);
+    // The desktop app runs only the documented string command; a split
+    // command+args pair degrades there to bare `node`, which swallows the
+    // hook stdin as a script and captures nothing.
+    assert.equal(handler?.command, `node "\${CLAUDE_PLUGIN_ROOT}/dist/claude-hook.js" ${eventName}`);
+    assert.equal(handler?.args, undefined);
   }
 });
 
@@ -89,6 +92,74 @@ test("committed binary, authorized + allowlisted: appends the SessionStart pair"
     .map((f) => (JSON.parse(readFileSync(join(dataDir, "outbox", f), "utf8")) as { kind: string }).kind)
     .sort();
   assert.deepEqual(kinds, ["SessionStart", "workspace.observed"]);
+});
+
+// A host keys one install's data directory per surface as
+// "<plugin-name>-<source>", so these fixtures are named the way a real
+// split install is — from the manifest, never a spelled-out product name.
+const pluginName = (
+  JSON.parse(readFileSync(join(process.cwd(), "claude-code", ".claude-plugin", "plugin.json"), "utf8")) as { name: string }
+).name;
+
+function splitInstall(surfaces: Record<string, string | null>): Record<string, string> {
+  const parent = mkdtempSync(join(tmpdir(), "trinity-pkg-split-"));
+  const dirs: Record<string, string> = {};
+  for (const [surface, deviceId] of Object.entries(surfaces)) {
+    const dir = join(parent, `${pluginName}-${surface}`);
+    mkdirSync(dir, { recursive: true });
+    dirs[surface] = dir;
+    if (deviceId === null) continue;
+    saveConfig(dir, { token: `tok-${deviceId}`, ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId });
+    savePolicy(dir, {
+      etag: "e1",
+      fetchedAt: Date.now(),
+      ttlSeconds: 900,
+      captureLevel: "metadata",
+      workspaces: [{ canonicalRepo: "github.com/acme/widgets", aliases: [], route: "project:p1" }],
+    });
+  }
+  return dirs;
+}
+
+function runSessionStart(dataDir: string): void {
+  const repo = initRepo("git@github.com:acme/widgets.git");
+  const stdin = JSON.parse(readFileSync(dialectStdinPath, "utf8")) as Record<string, unknown>;
+  stdin.cwd = repo;
+  runHookBinary(dataDir, "SessionStart", JSON.stringify(stdin));
+}
+
+function outboxCount(dir: string): number {
+  return existsSync(join(dir, "outbox")) ? readdirSync(join(dir, "outbox")).length : 0;
+}
+
+test("committed binary falls back to a paired sibling data directory", () => {
+  // The desktop app and the CLI key the same install differently; a device
+  // paired on one surface must capture on both.
+  const dirs = splitInstall({ inline: null, marketplace: "dev1" });
+  runSessionStart(dirs.inline);
+  assert.equal(outboxCount(dirs.inline), 0, "the unpaired provided dir takes no writes");
+  assert.equal(outboxCount(dirs.marketplace), 2, "events land in the paired sibling");
+});
+
+test("committed binary captures nowhere when paired siblings name different devices", () => {
+  // The resolved directory supplies the token AND the allowlist policy, so
+  // choosing between disagreeing siblings would file this session's prompts
+  // under another account's device. "alpha" sorts first: a lexical pick
+  // would send them there.
+  const dirs = splitInstall({ inline: null, alpha: "dev-alpha", marketplace: "dev-main" });
+  runSessionStart(dirs.inline);
+  for (const [surface, dir] of Object.entries(dirs)) {
+    assert.equal(outboxCount(dir), 0, `${surface} captured under an ambiguous pairing`);
+  }
+});
+
+test("committed binary captures when paired siblings share one pairing", () => {
+  // Two directory names for one device is not ambiguity: same token, same
+  // policy, so the fallback stays usable.
+  const dirs = splitInstall({ inline: null, alpha: "dev1", marketplace: "dev1" });
+  runSessionStart(dirs.inline);
+  assert.equal(outboxCount(dirs.inline), 0, "the unpaired provided dir takes no writes");
+  assert.equal(outboxCount(dirs.alpha) + outboxCount(dirs.marketplace), 2, "one of the identical pairings takes the events");
 });
 
 test("committed binary omits the complete connect-command session from capture", () => {
