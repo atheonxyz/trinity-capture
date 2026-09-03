@@ -1,7 +1,7 @@
 import test, { type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -144,6 +144,21 @@ test("a differently paired Claude sibling does not suppress capture", async (t) 
   const f = await fixture(t);
   await f.run(f.dirs.inline, "UserPromptSubmit", { prompt: "[Trinity setup]\nSETUP_SECRET" });
   f.pair(f.dirs.inline, "other-device");
+  f.pair(f.dirs.cli);
+
+  await f.run(f.dirs.cli, "UserPromptSubmit", { prompt: "ordinary work" });
+
+  assert.deepEqual(f.requests, ["/api/v1/ingest/batches"]);
+  assert.equal(outboxFiles(f.dirs.cli).length, 1);
+  assert.deepEqual(outboxFiles(f.dirs.inline), []);
+});
+
+test("a stale unpaired Claude sibling does not suppress capture", async (t) => {
+  const f = await fixture(t);
+  await f.run(f.dirs.inline, "UserPromptSubmit", { prompt: "[Trinity setup]\nSETUP_SECRET" });
+  const marker = join(f.dirs.inline, "suppressed-sessions", "claude_code-setup");
+  const stale = new Date(Date.now() - 60 * 60_000);
+  utimesSync(marker, stale, stale);
   f.pair(f.dirs.cli);
 
   await f.run(f.dirs.cli, "UserPromptSubmit", { prompt: "ordinary work" });

@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runHook } from "./hook-core.js";
@@ -16,6 +16,7 @@ function stringField(payload, key) {
 // reasoning/thinking-named.
 const ALLOW_EVERY_EVENT = ["hook_event_name", "session_id", "prompt_id", "permission_mode"];
 const CONNECT_COMMAND = /^\/trinity:connect(?:\s|$)/;
+const SETUP_MARKER_TRANSFER_WINDOW_MS = 30 * 60_000;
 const ALLOW_PER_EVENT = {
     SessionStart: ["source"],
     // The prompt text and the assistant reply are the capture contract (spec
@@ -129,7 +130,7 @@ function resolveDataDir(env) {
         return null;
     return candidates[0].dir;
 }
-function suppressionDirs(env, dataDir) {
+function suppressionDirs(env, dataDir, payload) {
     const provided = env.CLAUDE_PLUGIN_DATA;
     if (!provided)
         return [dataDir];
@@ -139,17 +140,30 @@ function suppressionDirs(env, dataDir) {
     try {
         const parent = dirname(provided);
         const identity = pairingIdentity(dataDir);
+        const sessionId = stringField(payload, "session_id");
         return [...new Set([
                 provided,
                 dataDir,
                 ...readdirSync(parent, { withFileTypes: true })
                     .filter((entry) => entry.isDirectory() && entry.name.startsWith(prefix))
                     .map((entry) => join(parent, entry.name))
-                    .filter((dir) => {
-                    const candidate = pairingIdentity(dir);
-                    return candidate === null || candidate === identity;
-                }),
-            ])];
+            ])].filter((dir) => {
+            if (dir === dataDir)
+                return true;
+            const candidate = pairingIdentity(dir);
+            if (identity !== null && candidate === identity)
+                return true;
+            if (candidate !== null || sessionId === null)
+                return false;
+            try {
+                return Date.now() - statSync(suppressedSessionFile(dir, sessionId)).mtimeMs <= SETUP_MARKER_TRANSFER_WINDOW_MS;
+            }
+            catch (error) {
+                if (error instanceof Error && "code" in error && error.code === "ENOENT")
+                    return false;
+                return true;
+            }
+        });
     }
     catch (error) {
         if (error instanceof Error)
