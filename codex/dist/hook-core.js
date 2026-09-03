@@ -131,9 +131,11 @@ export async function runHook(dialect, event, stdin, env) {
     if (!isRecord(parsed))
         return;
     const payload = parsed;
-    if (suppressSetupSession(dataDir, dialect, event, payload))
+    const suppressionDirs = dialect.suppressionDirs?.(env, dataDir) ?? [dataDir];
+    if (suppressionDirs.some((dir) => suppressSetupSession(dir, dialect, event, payload)))
         return;
-    if (dialect.suppress?.(dataDir, event, payload))
+    const suppress = dialect.suppress;
+    if (suppress && suppressionDirs.some((dir) => suppress(dir, event, payload)))
         return;
     const cfg = loadConfig(dataDir);
     if (!cfg)

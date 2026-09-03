@@ -129,6 +129,15 @@ function resolveDataDir(env) {
         return null;
     return candidates[0].dir;
 }
+function suppressionDirs(env, dataDir) {
+    const provided = env.CLAUDE_PLUGIN_DATA;
+    if (!provided)
+        return [dataDir];
+    const prefix = pluginNamePrefix();
+    if (prefix === null)
+        return provided === dataDir ? [dataDir] : [provided, dataDir];
+    return [...new Set([provided, dataDir, join(dirname(provided), `${prefix}inline`)])];
+}
 export const claudeCodeDialect = {
     tool: "claude_code",
     sessionId: (_event, payload) => stringField(payload, "session_id"),
@@ -140,6 +149,7 @@ export const claudeCodeDialect = {
     // append-only; every other event drains within the inline budget.
     drainsOn: (event) => event !== "SessionEnd",
     suppress: suppressConnectSession,
+    suppressionDirs,
     allow: (event) => [...ALLOW_EVERY_EVENT, ...(ALLOW_PER_EVENT[event] ?? [])],
     // Every hook runs synchronously — the desktop app silently skips entries
     // declared "async": true — so drains are budgeted inline, like codex's.

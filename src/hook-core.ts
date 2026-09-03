@@ -31,6 +31,7 @@ export interface Dialect {
   // (one bounded batch vs. the open multi-batch default).
   drainsOn(event: string): boolean;
   suppress?(dataDir: string, event: string, payload: Record<string, unknown>): boolean;
+  suppressionDirs?(env: NodeJS.ProcessEnv, dataDir: string): readonly string[];
   allow(event: string): readonly string[];
   drainInline: boolean;
   dataDir(env: NodeJS.ProcessEnv): string | null;
@@ -163,8 +164,10 @@ export async function runHook(dialect: Dialect, event: string, stdin: string, en
   const parsed: unknown = JSON.parse(stdin);
   if (!isRecord(parsed)) return;
   const payload = parsed;
-  if (suppressSetupSession(dataDir, dialect, event, payload)) return;
-  if (dialect.suppress?.(dataDir, event, payload)) return;
+  const suppressionDirs = dialect.suppressionDirs?.(env, dataDir) ?? [dataDir];
+  if (suppressionDirs.some((dir) => suppressSetupSession(dir, dialect, event, payload))) return;
+  const suppress = dialect.suppress;
+  if (suppress && suppressionDirs.some((dir) => suppress(dir, event, payload))) return;
 
   const cfg = loadConfig(dataDir);
   if (!cfg) return; // never authorized — fail closed, zero network requests
