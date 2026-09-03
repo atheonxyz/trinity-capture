@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { claudeCodeDialect } from "../src/claude-hook.js";
@@ -61,6 +61,12 @@ function outboxFiles(dataDir: string): string[] {
   return existsSync(dir) ? readdirSync(dir) : [];
 }
 
+function tmpPluginDataDir(prefix: string): string {
+  const dir = join(mkdtempSync(join(tmpdir(), prefix)), "trinity-fixture");
+  mkdirSync(dir);
+  return dir;
+}
+
 function pairAllowlistedRepo(dataDir: string): string {
   saveConfig(dataDir, { token: "tok", ingestUrl: "https://ingest.example/api/v1/ingest/batches", deviceId: "dev1" });
   savePolicy(dataDir, {
@@ -84,7 +90,7 @@ function envFor(dataDir: string): NodeJS.ProcessEnv {
 
 test("setup marker suppresses prompt and later events for every paired allowlisted dialect", async () => {
   for (const testCase of CASES) {
-    const dataDir = mkdtempSync(join(tmpdir(), `trinity-setup-${testCase.idPrefix}-`));
+    const dataDir = tmpPluginDataDir(`trinity-setup-${testCase.idPrefix}-`);
     const repo = pairAllowlistedRepo(dataDir);
     const env = envFor(dataDir);
     let requests = 0;
@@ -109,7 +115,7 @@ test("setup marker suppresses prompt and later events for every paired allowlist
 
 test("ordinary prompts in a different session still capture for every dialect", async () => {
   for (const testCase of CASES) {
-    const dataDir = mkdtempSync(join(tmpdir(), `trinity-setup-ordinary-${testCase.idPrefix}-`));
+    const dataDir = tmpPluginDataDir(`trinity-setup-ordinary-${testCase.idPrefix}-`);
     const repo = pairAllowlistedRepo(dataDir);
     const env = envFor(dataDir);
 
@@ -125,7 +131,7 @@ test("ordinary prompts in a different session still capture for every dialect", 
 });
 
 test("near-match setup text is not suppressed and still captures", async () => {
-  const dataDir = mkdtempSync(join(tmpdir(), "trinity-setup-near-"));
+  const dataDir = tmpPluginDataDir("trinity-setup-near-");
   const repo = pairAllowlistedRepo(dataDir);
 
   await runHook(
@@ -141,7 +147,7 @@ test("near-match setup text is not suppressed and still captures", async () => {
 
 test("marked setup prompt without a session id writes nothing", async () => {
   for (const testCase of CASES) {
-    const dataDir = mkdtempSync(join(tmpdir(), `trinity-setup-missing-session-${testCase.idPrefix}-`));
+    const dataDir = tmpPluginDataDir(`trinity-setup-missing-session-${testCase.idPrefix}-`);
     const repo = pairAllowlistedRepo(dataDir);
     let requests = 0;
     const original = globalThis.fetch;
@@ -168,7 +174,7 @@ test("marked setup prompt without a session id writes nothing", async () => {
 });
 
 test("unreadable setup suppression state fails closed", async () => {
-  const dataDir = mkdtempSync(join(tmpdir(), "trinity-setup-unreadable-"));
+  const dataDir = tmpPluginDataDir("trinity-setup-unreadable-");
   const repo = pairAllowlistedRepo(dataDir);
   writeFileSync(join(dataDir, "suppressed-sessions"), "not a directory");
   let requests = 0;
@@ -194,7 +200,7 @@ test("unreadable setup suppression state fails closed", async () => {
 });
 
 test("setup marker write failure is not swallowed", async () => {
-  const dataDir = mkdtempSync(join(tmpdir(), "trinity-setup-write-failure-"));
+  const dataDir = tmpPluginDataDir("trinity-setup-write-failure-");
   const repo = pairAllowlistedRepo(dataDir);
   writeFileSync(join(dataDir, "suppressed-sessions"), "not a directory");
 

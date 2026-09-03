@@ -13,7 +13,12 @@ const hook = join(process.cwd(), "claude-code", "dist", "claude-hook.js");
 async function fixture(t: TestContext) {
   const root = mkdtempSync(join(tmpdir(), "trinity-suppression-switch-"));
   const repo = initRepo("git@github.com:acme/widgets.git");
-  const dirs = { inline: join(root, "trinity-inline"), cli: join(root, "trinity-capture-trinity") };
+  const dirs = {
+    inline: join(root, "trinity-inline"),
+    cli: join(root, "trinity-capture-trinity"),
+    alpha: join(root, "trinity-alpha"),
+    beta: join(root, "trinity-beta"),
+  };
   for (const dir of Object.values(dirs)) mkdirSync(dir);
   const requests: string[] = [];
   const server = createServer((request, response) => {
@@ -36,10 +41,10 @@ async function fixture(t: TestContext) {
     root,
     dirs,
     requests,
-    pair(dataDir: string) {
+    pair(dataDir: string, deviceId = "fixture-device") {
       saveConfig(dataDir, {
-        token: "fixture-token",
-        deviceId: "fixture-device",
+        token: `token-${deviceId}`,
+        deviceId,
         ingestUrl: `http://127.0.0.1:${address.port}/api/v1/ingest/batches`,
       });
       savePolicy(dataDir, {
@@ -65,7 +70,12 @@ async function fixture(t: TestContext) {
 }
 
 for (const prompt of ["[Trinity setup]\nSETUP_SECRET", "/trinity:connect SETUP_SECRET"]) {
-  for (const [source, paired] of [["inline", "cli"], ["inline", "inline"], ["cli", "cli"]] as const) {
+  for (const [source, paired] of [
+    ["inline", "cli"],
+    ["inline", "inline"],
+    ["cli", "cli"],
+    ["alpha", "beta"],
+  ] as const) {
     test(`${prompt.split("\n")[0]} stays suppressed when setup starts on ${source} and pairs ${paired}`, async (t) => {
       const f = await fixture(t);
       await f.run(f.dirs[source], "UserPromptSubmit", { prompt });
@@ -117,4 +127,28 @@ test("another plugin's marker does not suppress Claude capture", async (t) => {
 
   assert.deepEqual(f.requests, ["/api/v1/ingest/batches"]);
   assert.equal(outboxFiles(f.dirs.cli).length, 1);
+});
+
+test("a prefixed non-directory does not suppress Claude capture", async (t) => {
+  const f = await fixture(t);
+  writeFileSync(join(f.root, "trinity-capture.log"), "not a plugin directory");
+  f.pair(f.dirs.cli);
+
+  await f.run(f.dirs.cli, "UserPromptSubmit", { prompt: "ordinary work" });
+
+  assert.deepEqual(f.requests, ["/api/v1/ingest/batches"]);
+  assert.equal(outboxFiles(f.dirs.cli).length, 1);
+});
+
+test("a differently paired Claude sibling does not suppress capture", async (t) => {
+  const f = await fixture(t);
+  await f.run(f.dirs.inline, "UserPromptSubmit", { prompt: "[Trinity setup]\nSETUP_SECRET" });
+  f.pair(f.dirs.inline, "other-device");
+  f.pair(f.dirs.cli);
+
+  await f.run(f.dirs.cli, "UserPromptSubmit", { prompt: "ordinary work" });
+
+  assert.deepEqual(f.requests, ["/api/v1/ingest/batches"]);
+  assert.equal(outboxFiles(f.dirs.cli).length, 1);
+  assert.deepEqual(outboxFiles(f.dirs.inline), []);
 });

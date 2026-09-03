@@ -125,7 +125,24 @@ function suppressionDirs(env: NodeJS.ProcessEnv, dataDir: string): readonly stri
   if (!provided) return [dataDir];
   const prefix = pluginNamePrefix();
   if (prefix === null) return provided === dataDir ? [dataDir] : [provided, dataDir];
-  return [...new Set([provided, dataDir, join(dirname(provided), `${prefix}inline`)])];
+  try {
+    const parent = dirname(provided);
+    const identity = pairingIdentity(dataDir);
+    return [...new Set([
+      provided,
+      dataDir,
+      ...readdirSync(parent, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory() && entry.name.startsWith(prefix))
+        .map((entry) => join(parent, entry.name))
+        .filter((dir) => {
+          const candidate = pairingIdentity(dir);
+          return candidate === null || candidate === identity;
+        }),
+    ])];
+  } catch (error) {
+    if (error instanceof Error) return provided === dataDir ? [dataDir] : [provided, dataDir];
+    throw error;
+  }
 }
 
 export const claudeCodeDialect: Dialect = {
