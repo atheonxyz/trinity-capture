@@ -2,11 +2,11 @@ import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { DEFAULT_BASE_URL, exchange, supportsNodeVersion } from "./connect.js";
 import { loadPolicy, saveConfig } from "./config.js";
 import type { DeviceConfig } from "./config.js";
 import { isPolicyFresh } from "./gate.js";
+import { isMainModule } from "./main-module.js";
 import { refreshPolicy } from "./send.js";
 
 const CAPTURE_DIR = "trinity-capture";
@@ -143,7 +143,6 @@ async function main(): Promise<void> {
   }
 }
 
-const isMainModule = process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
-if (isMainModule) {
+if (isMainModule(import.meta.url)) {
   main();
 }

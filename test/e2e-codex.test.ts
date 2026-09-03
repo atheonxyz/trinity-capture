@@ -40,6 +40,8 @@ const ready = Boolean(e2eURL && sessionToken && projectId && userId && postgresU
 const skip = ready
   ? false
   : "set TRINITY_E2E_URL, TRINITY_E2E_SESSION_TOKEN, TRINITY_E2E_PROJECT_ID, TRINITY_E2E_USER_ID, TRINITY_E2E_POSTGRES_URL to run (see README.md).";
+const sessionPollDeadlineMs = 6 * 60 * 1_000;
+const sessionPollIntervalMs = 1_000;
 
 const SEEDED_REPO_REMOTE = "git@github.com:acme/codex-fixture.git";
 const SEEDED_CANONICAL_REPO = "github.com/acme/codex-fixture";
@@ -72,6 +74,20 @@ function initRepo(remote: string): string {
 
 async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function projectedSessionID(postgresURL: string, externalSessionId: string): string | undefined {
+  const output = execFileSync(
+    "psql",
+    [
+      postgresURL,
+      "-tA",
+      "-c",
+      `SELECT id FROM coding_sessions WHERE external_session_id = '${externalSessionId}' AND turn_count = 2 AND ended_at IS NOT NULL AND capture_state = 'complete'`,
+    ],
+    { encoding: "utf8" },
+  ).trim();
+  return output === "" ? undefined : output;
 }
 
 test("pairs a codex device, replays the real captured hook stream through the real dialect, and reads it back through the dashboard API", { skip }, async () => {
@@ -128,18 +144,22 @@ test("pairs a codex device, replays the real captured hook stream through the re
 
   // 5. Poll the dashboard API — real person-session bearer, not the device token.
   let session: SessionDTO | undefined;
-  for (let attempt = 0; attempt < 20 && !session; attempt++) {
-    const res = await fetch(`${baseUrl}/api/v1/projects/${projectId}/people/${userId}/sessions`, {
+  let sessionID: string | undefined;
+  const deadline = Date.now() + sessionPollDeadlineMs;
+  while (!session && Date.now() < deadline) {
+    sessionID = projectedSessionID(postgresURL, externalSessionId);
+    const res = await fetch(`${baseUrl}/api/v1/projects/${projectId}/people/${userId}/sessions?limit=50`, {
       headers: { Authorization: `Bearer ${sessionToken}` },
     });
     if (res.status !== 200) assert.fail(`GET .../sessions: ${res.status} ${await res.text()}`);
     const body = (await res.json()) as { sessions: SessionDTO[] };
-    session = body.sessions.find((s) => s.turn_count === 2 && s.repository_key === SEEDED_CANONICAL_REPO);
-    if (!session) await sleep(500);
+    session = body.sessions.find((s) => s.session_id === sessionID && s.turn_count === 2 && s.lifecycle_status === "complete");
+    if (!session) await sleep(sessionPollIntervalMs);
   }
   assert.ok(session, "codex session with 2 turns never appeared");
 
   assert.equal(session.repository_key, SEEDED_CANONICAL_REPO);
+  assert.equal(session.turn_count, 2);
   assert.equal(session.lifecycle_status, "complete");
 
   // 6. tool_calls carries no bodies — the sessions list DTO doesn't expose

@@ -1,7 +1,8 @@
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { runHook } from "./hook-core.js";
+import { isMainModule } from "./main-module.js";
 function stringField(payload, key) {
     const value = payload[key];
     return typeof value === "string" && value !== "" ? value : null;
@@ -15,6 +16,7 @@ function stringField(payload, key) {
 // reasoning/thinking-named.
 const ALLOW_EVERY_EVENT = ["hook_event_name", "session_id", "prompt_id", "permission_mode"];
 const CONNECT_COMMAND = /^\/trinity:connect(?:\s|$)/;
+const SETUP_MARKER_TRANSFER_WINDOW_MS = 30 * 60_000;
 const ALLOW_PER_EVENT = {
     SessionStart: ["source"],
     // The prompt text and the assistant reply are the capture contract (spec
@@ -128,6 +130,48 @@ function resolveDataDir(env) {
         return null;
     return candidates[0].dir;
 }
+function suppressionDirs(env, dataDir, payload) {
+    const provided = env.CLAUDE_PLUGIN_DATA;
+    if (!provided)
+        return [dataDir];
+    const prefix = pluginNamePrefix();
+    if (prefix === null)
+        return provided === dataDir ? [dataDir] : [provided, dataDir];
+    try {
+        const parent = dirname(provided);
+        const identity = pairingIdentity(dataDir);
+        const sessionId = stringField(payload, "session_id");
+        const entries = readdirSync(parent, { withFileTypes: true });
+        return [...new Set([
+                dataDir,
+                ...entries
+                    .filter((entry) => entry.isDirectory() && entry.name.startsWith(prefix))
+                    .map((entry) => join(parent, entry.name))
+            ])].filter((dir) => {
+            if (dir === dataDir)
+                return true;
+            const candidate = pairingIdentity(dir);
+            if (identity !== null && candidate === identity)
+                return true;
+            if (candidate !== null || sessionId === null)
+                return false;
+            try {
+                const age = Date.now() - statSync(suppressedSessionFile(dir, sessionId)).mtimeMs;
+                return age >= 0 && age <= SETUP_MARKER_TRANSFER_WINDOW_MS;
+            }
+            catch (error) {
+                if (error instanceof Error && "code" in error && error.code === "ENOENT")
+                    return false;
+                return true;
+            }
+        });
+    }
+    catch (error) {
+        if (error instanceof Error)
+            return provided === dataDir ? [dataDir] : [provided, dataDir];
+        throw error;
+    }
+}
 export const claudeCodeDialect = {
     tool: "claude_code",
     sessionId: (_event, payload) => stringField(payload, "session_id"),
@@ -139,6 +183,7 @@ export const claudeCodeDialect = {
     // append-only; every other event drains within the inline budget.
     drainsOn: (event) => event !== "SessionEnd",
     suppress: suppressConnectSession,
+    suppressionDirs,
     allow: (event) => [...ALLOW_EVERY_EVENT, ...(ALLOW_PER_EVENT[event] ?? [])],
     // Every hook runs synchronously — the desktop app silently skips entries
     // declared "async": true — so drains are budgeted inline, like codex's.
@@ -152,8 +197,7 @@ async function cli() {
     const stdin = readFileSync(0, "utf8");
     await runHook(claudeCodeDialect, eventName, stdin, process.env);
 }
-const isMainModule = process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
-if (isMainModule) {
+if (isMainModule(import.meta.url)) {
     cli()
         .catch(() => { })
         .finally(() => process.exit(0));

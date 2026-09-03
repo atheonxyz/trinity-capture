@@ -31,9 +31,44 @@ export interface Dialect {
   // (one bounded batch vs. the open multi-batch default).
   drainsOn(event: string): boolean;
   suppress?(dataDir: string, event: string, payload: Record<string, unknown>): boolean;
+  suppressionDirs?(env: NodeJS.ProcessEnv, dataDir: string, payload: Record<string, unknown>): readonly string[];
   allow(event: string): readonly string[];
   drainInline: boolean;
   dataDir(env: NodeJS.ProcessEnv): string | null;
+}
+
+const SETUP_PROMPT_PREFIX = "[Trinity setup]\n";
+
+function isENOENT(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
+}
+
+function suppressSetupSession(
+  dataDir: string,
+  dialect: Dialect,
+  event: string,
+  payload: Record<string, unknown>,
+): boolean {
+  const sessionId = dialect.sessionId(event, payload);
+  if (dialect.isPromptSubmit(event)) {
+    const prompt = payload.prompt;
+    if (typeof prompt === "string" && prompt.startsWith(SETUP_PROMPT_PREFIX)) {
+      if (sessionId === null || sessionId === "") return true;
+      const marker = join(dataDir, "suppressed-sessions", `${dialect.tool}-${encodeURIComponent(sessionId)}`);
+      mkdirSync(join(dataDir, "suppressed-sessions"), { recursive: true, mode: 0o700 });
+      writeFileSync(marker, "", { flag: "a", mode: 0o600 });
+      return true;
+    }
+  }
+  if (sessionId === null || sessionId === "") return false;
+  const marker = join(dataDir, "suppressed-sessions", `${dialect.tool}-${encodeURIComponent(sessionId)}`);
+  try {
+    readFileSync(marker);
+    return true;
+  } catch (error) {
+    if (isENOENT(error)) return false;
+    return true;
+  }
 }
 
 function filterPayload(payload: Record<string, unknown>, allowed: readonly string[]): Record<string, unknown> {
@@ -129,7 +164,10 @@ export async function runHook(dialect: Dialect, event: string, stdin: string, en
   const parsed: unknown = JSON.parse(stdin);
   if (!isRecord(parsed)) return;
   const payload = parsed;
-  if (dialect.suppress?.(dataDir, event, payload)) return;
+  const suppressionDirs = dialect.suppressionDirs?.(env, dataDir, payload) ?? [dataDir];
+  if (suppressionDirs.some((dir) => suppressSetupSession(dir, dialect, event, payload))) return;
+  const suppress = dialect.suppress;
+  if (suppress && suppressionDirs.some((dir) => suppress(dir, event, payload))) return;
 
   const cfg = loadConfig(dataDir);
   if (!cfg) return; // never authorized — fail closed, zero network requests

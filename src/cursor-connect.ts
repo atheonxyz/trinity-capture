@@ -1,11 +1,11 @@
 import { chmodSync, mkdirSync } from "node:fs";
 import { platform } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { cursorDialect } from "./cursor-hook.js";
 import { exchange } from "./connect.js";
-import { saveConfig, type DeviceConfig } from "./config.js";
+import { loadConfig, saveConfig, type DeviceConfig } from "./config.js";
 import { isPolicyFresh } from "./gate.js";
+import { isMainModule } from "./main-module.js";
 import { refreshPolicy } from "./send.js";
 import { exchangeDeviceAuthorization, openBrowserURL, startDeviceAuthorization, wait } from "./device-authorization.js";
 
@@ -25,6 +25,10 @@ export async function connectCursor(baseUrl: string, code: string, dataDir: stri
 async function saveCursorConnection(dataDir: string, cfg: DeviceConfig): Promise<void> {
   mkdirSync(dataDir, { recursive: true, mode: 0o700 });
   securePosixMode(dataDir, 0o700);
+  const existing = loadConfig(dataDir);
+  if (existing !== null && new URL(existing.ingestUrl).origin !== new URL(cfg.ingestUrl).origin) {
+    throw new Error("Existing Trinity connection kept. Disconnect before switching Trinity environments.");
+  }
   saveConfig(dataDir, cfg);
   securePosixMode(join(dataDir, "config.json"), 0o600);
   const policy = await refreshPolicy(dataDir, cfg);
@@ -101,7 +105,6 @@ async function main(): Promise<void> {
   }
 }
 
-const isMainModule = process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
-if (isMainModule) {
+if (isMainModule(import.meta.url)) {
   main();
 }

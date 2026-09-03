@@ -5,13 +5,14 @@ import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
 import { authorizeCursor, connectCursor } from "../src/cursor-connect.js";
 import { cursorDialect } from "../src/cursor-hook.js";
-import { loadConfig } from "../src/config.js";
+import { loadConfig, saveConfig, savePolicy } from "../src/config.js";
+import type { DeviceConfig, Policy } from "../src/config.js";
 
 function tmpParentDir(): string {
   return mkdtempSync(join(tmpdir(), "trinity-cursor-connect-"));
 }
 
-function stubExchange(deviceConfig: { token: string; ingestUrl: string; deviceId: string }): () => void {
+function stubExchange(deviceConfig: DeviceConfig): () => void {
   const original = globalThis.fetch;
   globalThis.fetch = (async (url: string | URL) => {
     const href = String(url);
@@ -30,6 +31,16 @@ function stubExchange(deviceConfig: { token: string; ingestUrl: string; deviceId
   }) as typeof fetch;
   return () => {
     globalThis.fetch = original;
+  };
+}
+
+function policy(): Policy {
+  return {
+    etag: "policy-1",
+    fetchedAt: Date.now(),
+    ttlSeconds: 900,
+    captureLevel: "metadata",
+    workspaces: [{ canonicalRepo: "github.com/acme/widgets", aliases: [], route: "project:p1" }],
   };
 }
 
@@ -148,6 +159,40 @@ test("connect is idempotent: reconnecting re-secures permissions on an already-e
   if (platform() !== "win32") {
     assert.equal(statSync(join(dataDir, "config.json")).mode & 0o777, 0o600);
   }
+});
+
+test("connect keeps an existing config and policy when the new device uses a different ingest origin", async () => {
+  const parent = tmpParentDir();
+  const dataDir = join(parent, "cursor");
+  const existing: DeviceConfig = {
+    token: "staging-token",
+    ingestUrl: "https://api-staging.usetrinity.ai/api/v1/ingest/batches",
+    deviceId: "staging-device",
+  };
+  saveConfig(dataDir, existing);
+  savePolicy(dataDir, policy());
+  const configPath = join(dataDir, "config.json");
+  const policyPath = join(dataDir, "policy.json");
+  const originalConfig = readFileSync(configPath, "utf8");
+  const originalPolicy = readFileSync(policyPath, "utf8");
+  const restore = stubExchange({
+    token: "local-token",
+    ingestUrl: "http://127.0.0.1:3000/api/v1/ingest/batches",
+    deviceId: "local-device",
+  });
+
+  try {
+    await assert.rejects(
+      connectCursor("http://127.0.0.1:5173", "LOCAL-CODE", dataDir),
+      /Existing Trinity connection kept.*disconnect.*switch/i,
+    );
+  } finally {
+    restore();
+  }
+
+  assert.equal(readFileSync(configPath, "utf8"), originalConfig);
+  assert.equal(readFileSync(policyPath, "utf8"), originalPolicy);
+  assert.deepEqual(loadConfig(dataDir), existing);
 });
 
 test("the data directory connect writes to is ready for cursor-hook.js", async () => {
