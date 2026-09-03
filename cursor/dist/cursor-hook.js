@@ -16,9 +16,9 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { loadConfig } from "./config.js";
 import { runHook } from "./hook-core.js";
+import { isMainModule } from "./main-module.js";
 import { recordDrop } from "./outbox.js";
 function str(payload, key) {
     const value = payload[key];
@@ -119,8 +119,7 @@ async function cli() {
     const stdin = readFileSync(0, "utf8");
     await runCursorHook(eventName, stdin, process.env);
 }
-const isMainModule = process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
-if (isMainModule) {
+if (isMainModule(import.meta.url)) {
     cli()
         .catch(() => { })
         .finally(() => process.exit(0));

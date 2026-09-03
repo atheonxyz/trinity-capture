@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, readdirSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, symlinkSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runHook } from "../src/hook-core.js";
@@ -236,4 +236,27 @@ test("the connect command suppresses the rest of its Codex session", async () =>
   await runCodexHook({ hook_event_name: "SessionEnd", session_id: session, reason: "other", cwd: repo }, dataDir);
 
   assert.deepEqual(outboxFiles(dataDir), []);
+});
+
+test("a symlinked codex hook entrypoint still appends allowlisted events", () => {
+  const dataDir = tmpDataDir();
+  const cfg: DeviceConfig = { token: "tok", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev1" };
+  saveConfig(dataDir, cfg);
+  savePolicy(dataDir, freshPolicy("github.com/acme/widgets"));
+  const repo = initRepo("git@github.com:acme/widgets.git");
+  const [sessionStart] = loadFixtureLines();
+  const linkDir = mkdtempSync(join(tmpdir(), "trinity-codex-hook-link-"));
+  const entrypoint = join(process.cwd(), "dist-test/src/codex-hook.js");
+  const linkedEntrypoint = join(linkDir, "codex-hook.js");
+  symlinkSync(entrypoint, linkedEntrypoint);
+
+  const result = spawnSync(process.execPath, [linkedEntrypoint, "SessionStart"], {
+    env: { ...process.env, PLUGIN_DATA: dataDir },
+    input: JSON.stringify({ ...sessionStart, cwd: repo }),
+    encoding: "utf8",
+  });
+
+  assert.equal(result.status, 0);
+  assert.equal(result.stderr, "");
+  assert.equal(outboxFiles(dataDir).length, 2);
 });

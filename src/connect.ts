@@ -1,7 +1,7 @@
-import { pathToFileURL } from "node:url";
 import { loadConfig, saveConfig } from "./config.js";
 import type { DeviceConfig } from "./config.js";
 import { isPolicyFresh } from "./gate.js";
+import { isMainModule } from "./main-module.js";
 import { refreshPolicy, REQUEST_TIMEOUT_MS } from "./send.js";
 
 export const DEFAULT_BASE_URL = "https://api.usetrinity.ai";
@@ -74,7 +74,6 @@ async function main(): Promise<void> {
   }
 }
 
-const isMainModule = process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
-if (isMainModule) {
+if (isMainModule(import.meta.url)) {
   main();
 }

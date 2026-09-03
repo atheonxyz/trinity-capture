@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, symlinkSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -105,4 +105,20 @@ test("running connect without a new code retries policy sync for an existing dev
   } finally {
     await server.close();
   }
+});
+
+test("a symlinked connect entrypoint still runs the CLI main", () => {
+  const linkDir = mkdtempSync(join(tmpdir(), "trinity-connect-link-"));
+  const entrypoint = join(process.cwd(), "dist-test/src/connect.js");
+  const linkedEntrypoint = join(linkDir, "connect.js");
+  symlinkSync(entrypoint, linkedEntrypoint);
+
+  const result = spawnSync(process.execPath, [linkedEntrypoint], {
+    env: { ...process.env, CLAUDE_PLUGIN_DATA: mkdtempSync(join(tmpdir(), "trinity-connect-data-")) },
+    encoding: "utf8",
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /No pairing code provided/);
+  assert.equal(result.stdout, "");
 });

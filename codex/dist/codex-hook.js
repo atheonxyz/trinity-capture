@@ -4,10 +4,10 @@
 // table; runHook (hook-core.ts) owns the shared engine.
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { runHook } from "./hook-core.js";
 import { DEFAULT_BASE_URL } from "./connect.js";
 import { codexHome, promotePendingConfig } from "./codex-connect.js";
+import { isMainModule } from "./main-module.js";
 function stringField(payload, key) {
     const value = payload[key];
     return typeof value === "string" && value !== "" ? value : null;
@@ -105,8 +105,7 @@ async function cli() {
     }
     await runHook(codexDialect, eventName, stdin, process.env);
 }
-const isMainModule = process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
-if (isMainModule) {
+if (isMainModule(import.meta.url)) {
     cli()
         .catch(() => { })
         .finally(() => process.exit(0));

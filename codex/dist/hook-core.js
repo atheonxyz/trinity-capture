@@ -10,6 +10,36 @@ import { isPolicyFresh, matchRoute, routeFor } from "./gate.js";
 import { appendEvent, drain, INLINE_DRAIN_BUDGET_MS } from "./outbox.js";
 import { gitRemoteOf, repoRelativeCwd, workspaceObserved } from "./observe.js";
 import { refreshPolicy } from "./send.js";
+const SETUP_PROMPT_PREFIX = "[Trinity setup]\n";
+function isENOENT(error) {
+    return error instanceof Error && "code" in error && error.code === "ENOENT";
+}
+function suppressSetupSession(dataDir, dialect, event, payload) {
+    const sessionId = dialect.sessionId(event, payload);
+    if (dialect.isPromptSubmit(event)) {
+        const prompt = payload.prompt;
+        if (typeof prompt === "string" && prompt.startsWith(SETUP_PROMPT_PREFIX)) {
+            if (sessionId === null || sessionId === "")
+                return true;
+            const marker = join(dataDir, "suppressed-sessions", `${dialect.tool}-${encodeURIComponent(sessionId)}`);
+            mkdirSync(join(dataDir, "suppressed-sessions"), { recursive: true, mode: 0o700 });
+            writeFileSync(marker, "", { flag: "a", mode: 0o600 });
+            return true;
+        }
+    }
+    if (sessionId === null || sessionId === "")
+        return false;
+    const marker = join(dataDir, "suppressed-sessions", `${dialect.tool}-${encodeURIComponent(sessionId)}`);
+    try {
+        readFileSync(marker);
+        return true;
+    }
+    catch (error) {
+        if (isENOENT(error))
+            return false;
+        return true;
+    }
+}
 function filterPayload(payload, allowed) {
     const out = {};
     for (const key of allowed) {
@@ -101,6 +131,8 @@ export async function runHook(dialect, event, stdin, env) {
     if (!isRecord(parsed))
         return;
     const payload = parsed;
+    if (suppressSetupSession(dataDir, dialect, event, payload))
+        return;
     if (dialect.suppress?.(dataDir, event, payload))
         return;
     const cfg = loadConfig(dataDir);

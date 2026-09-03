@@ -2,10 +2,10 @@ import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
 import { DEFAULT_BASE_URL, exchange, supportsNodeVersion } from "./connect.js";
 import { loadPolicy, saveConfig } from "./config.js";
 import { isPolicyFresh } from "./gate.js";
+import { isMainModule } from "./main-module.js";
 import { refreshPolicy } from "./send.js";
 const CAPTURE_DIR = "trinity-capture";
 const PENDING_CONFIG_FILE = "pending-device.json";
@@ -136,7 +136,6 @@ async function main() {
         process.exitCode = 1;
     }
 }
-const isMainModule = process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
-if (isMainModule) {
+if (isMainModule(import.meta.url)) {
     main();
 }

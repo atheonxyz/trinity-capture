@@ -1,8 +1,9 @@
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import type { Dialect } from "./hook-core.js";
 import { runHook } from "./hook-core.js";
+import { isMainModule } from "./main-module.js";
 
 function stringField(payload: Record<string, unknown>, key: string): string | null {
   const value = payload[key];
@@ -144,8 +145,7 @@ async function cli(): Promise<void> {
   await runHook(claudeCodeDialect, eventName, stdin, process.env);
 }
 
-const isMainModule = process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
-if (isMainModule) {
+if (isMainModule(import.meta.url)) {
   cli()
     .catch(() => {})
     .finally(() => process.exit(0));
