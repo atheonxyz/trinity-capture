@@ -35,6 +35,8 @@ const ready = Boolean(e2eURL && sessionToken && projectId && userId && postgresU
 const skip = ready
   ? false
   : "set TRINITY_E2E_URL, TRINITY_E2E_SESSION_TOKEN, TRINITY_E2E_PROJECT_ID, TRINITY_E2E_USER_ID, TRINITY_E2E_POSTGRES_URL to run (see README.md)";
+const sessionPollDeadlineMs = 6 * 60 * 1_000;
+const sessionPollIntervalMs = 1_000;
 
 interface Fixture {
   captureEventId: string;
@@ -48,6 +50,13 @@ interface Fixture {
   payload: unknown;
 }
 
+function retargetClaudePayload(raw: Fixture, externalSessionId: string): unknown {
+  if (raw.kind === "workspace.observed" || typeof raw.payload !== "object" || raw.payload === null || Array.isArray(raw.payload)) {
+    return raw.payload;
+  }
+  return { ...raw.payload, session_id: externalSessionId };
+}
+
 interface SessionDTO {
   session_id: string;
   title: string;
@@ -58,6 +67,20 @@ interface SessionDTO {
 
 async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function projectedSessionID(postgresURL: string, externalSessionId: string): string | undefined {
+  const output = execFileSync(
+    "psql",
+    [
+      postgresURL,
+      "-tA",
+      "-c",
+      `SELECT id FROM coding_sessions WHERE external_session_id = '${externalSessionId}' AND turn_count = 2 AND ended_at IS NOT NULL AND capture_state = 'complete'`,
+    ],
+    { encoding: "utf8" },
+  ).trim();
+  return output === "" ? undefined : output;
 }
 
 test("pairs a device, replays a session, and reads it back through the dashboard API", { skip }, async () => {
@@ -98,21 +121,29 @@ test("pairs a device, replays a session, and reads it back through the dashboard
   const externalSessionId = randomUUID();
   for (const line of lines) {
     const raw = JSON.parse(line) as Fixture;
-    const ev: CaptureEvent = { ...raw, captureEventId: randomUUID(), externalSessionId };
+    const ev: CaptureEvent = {
+      ...raw,
+      captureEventId: randomUUID(),
+      externalSessionId,
+      payload: retargetClaudePayload(raw, externalSessionId),
+    };
     appendEvent(dataDir, ev);
   }
   await drain(dataDir, cfg, { inline: false, deadline: 0 });
 
   // 5. Poll the dashboard API — real person-session bearer, not the device token.
   let session: SessionDTO | undefined;
-  for (let attempt = 0; attempt < 20 && !session; attempt++) {
-    const res = await fetch(`${baseUrl}/api/v1/projects/${projectId}/people/${userId}/sessions`, {
+  let sessionID: string | undefined;
+  const deadline = Date.now() + sessionPollDeadlineMs;
+  while (!session && Date.now() < deadline) {
+    sessionID = projectedSessionID(postgresURL, externalSessionId);
+    const res = await fetch(`${baseUrl}/api/v1/projects/${projectId}/people/${userId}/sessions?limit=50`, {
       headers: { Authorization: `Bearer ${sessionToken}` },
     });
     if (res.status !== 200) assert.fail(`GET .../sessions: ${res.status} ${await res.text()}`);
     const body = (await res.json()) as { sessions: SessionDTO[] };
-    session = body.sessions.find((s) => s.turn_count === 2);
-    if (!session) await sleep(500);
+    session = body.sessions.find((s) => s.session_id === sessionID && s.turn_count === 2 && s.lifecycle_status === "complete");
+    if (!session) await sleep(sessionPollIntervalMs);
   }
   assert.ok(session, "session with 2 turns never appeared");
 

@@ -9,11 +9,6 @@
 // against a live server (the same shape test/cursor-hook.test.ts's
 // in-process "reconciliation gate" test proves locally).
 //
-// Skipped unless TRINITY_E2E_URL is set. Reuses the same seeded
-// project/repo as the Claude Code e2e smoke — see README.md "e2e smoke"
-// for the exact seed commands — because a cursor-specific fixture repo has
-// no seed step of its own yet; this proves the same wiring one layer
-// closer to what a real Cursor install would send.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -27,6 +22,9 @@ import { loadConfig } from "../src/config.js";
 import { refreshPolicy } from "../src/send.js";
 import { runCursorHook } from "../src/cursor-hook.js";
 
+const SEEDED_CANONICAL_REPO = "github.com/acme/cursor-fixture";
+const SEEDED_REPO_REMOTE = "git@github.com:acme/cursor-fixture.git";
+
 const e2eURL = process.env.TRINITY_E2E_URL;
 const sessionToken = process.env.TRINITY_E2E_SESSION_TOKEN;
 const projectId = process.env.TRINITY_E2E_PROJECT_ID;
@@ -37,6 +35,8 @@ const ready = Boolean(e2eURL && sessionToken && projectId && userId && postgresU
 const skip = ready
   ? false
   : "set TRINITY_E2E_URL, TRINITY_E2E_SESSION_TOKEN, TRINITY_E2E_PROJECT_ID, TRINITY_E2E_USER_ID, TRINITY_E2E_POSTGRES_URL to run (see README.md)";
+const sessionPollDeadlineMs = 6 * 60 * 1_000;
+const sessionPollIntervalMs = 1_000;
 
 interface SessionDTO {
   session_id: string;
@@ -48,6 +48,20 @@ interface SessionDTO {
 
 async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function projectedSessionID(postgresURL: string, externalSessionId: string): string | undefined {
+  const output = execFileSync(
+    "psql",
+    [
+      postgresURL,
+      "-tA",
+      "-c",
+      `SELECT id FROM coding_sessions WHERE external_session_id = '${externalSessionId}' AND turn_count = 2 AND ended_at IS NOT NULL AND capture_state = 'complete'`,
+    ],
+    { encoding: "utf8" },
+  ).trim();
+  return output === "" ? undefined : output;
 }
 
 function gitEnv(): NodeJS.ProcessEnv {
@@ -93,7 +107,7 @@ test("pairs a Cursor device, replays the raw captured stream, and reads it back 
   // 3. The plugin's own policy fetch — asserts the seeded repo is allowlisted.
   const policy = await refreshPolicy(dataDir, cfg);
   assert.ok(policy, "policy fetch failed");
-  const entry = policy.workspaces.find((w) => w.canonicalRepo === "github.com/acme/claude-code-fixture");
+  const entry = policy.workspaces.find((w) => w.canonicalRepo === SEEDED_CANONICAL_REPO);
   assert.ok(entry, "seeded repo missing from policy");
   assert.match(entry.route, /^project:/);
 
@@ -103,7 +117,7 @@ test("pairs a Cursor device, replays the raw captured stream, and reads it back 
   // afterAgentResponse/sessionEnd actually drain — by sessionEnd the whole
   // 13-event outbox (well under the 100-event batch cap) sends in one
   // inline batch.
-  const repo = initRepo("git@github.com:acme/claude-code-fixture.git");
+  const repo = initRepo(SEEDED_REPO_REMOTE);
   const fixturePath = join(process.cwd(), "test/testdata/cursor_session.jsonl");
   const lines = readFileSync(fixturePath, "utf8").trim().split("\n");
   const externalSessionId = randomUUID();
@@ -116,18 +130,21 @@ test("pairs a Cursor device, replays the raw captured stream, and reads it back 
 
   // 5. Poll the dashboard API — real person-session bearer, not the device token.
   let session: SessionDTO | undefined;
-  for (let attempt = 0; attempt < 20 && !session; attempt++) {
-    const res = await fetch(`${baseUrl}/api/v1/projects/${projectId}/people/${userId}/sessions`, {
+  let sessionID: string | undefined;
+  const deadline = Date.now() + sessionPollDeadlineMs;
+  while (!session && Date.now() < deadline) {
+    sessionID = projectedSessionID(postgresURL, externalSessionId);
+    const res = await fetch(`${baseUrl}/api/v1/projects/${projectId}/people/${userId}/sessions?limit=50`, {
       headers: { Authorization: `Bearer ${sessionToken}` },
     });
     if (res.status !== 200) assert.fail(`GET .../sessions: ${res.status} ${await res.text()}`);
     const body = (await res.json()) as { sessions: SessionDTO[] };
-    session = body.sessions.find((s) => s.session_id === externalSessionId);
-    if (!session) await sleep(500);
+    session = body.sessions.find((s) => s.session_id === sessionID && s.turn_count === 2 && s.lifecycle_status === "complete");
+    if (!session) await sleep(sessionPollIntervalMs);
   }
   assert.ok(session, "the replayed cursor session never appeared");
 
-  assert.equal(session.repository_key, "github.com/acme/claude-code-fixture");
+  assert.equal(session.repository_key, SEEDED_CANONICAL_REPO);
   assert.equal(session.turn_count, 2, "the fixture's first turn opens with no beforeSubmitPrompt but still counts");
   assert.equal(session.lifecycle_status, "complete");
 
