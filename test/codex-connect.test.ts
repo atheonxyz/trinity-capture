@@ -1,4 +1,4 @@
-import test from "node:test";
+import test, { mock } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -7,9 +7,42 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { exchange } from "../src/connect.js";
 import { codexHome, confirmedConfigPath, pendingConfigPath, promotePendingConfig, targetKeyForPluginData, writePendingConfig } from "../src/codex-connect.js";
-import { loadConfig, saveConfig, savePolicy } from "../src/config.js";
+import { loadConfig, loadPolicy, saveConfig, savePolicy } from "../src/config.js";
 import type { DeviceConfig } from "../src/config.js";
 import { activationStatus } from "../src/activation.js";
+
+const fetchOriginal = globalThis.fetch;
+test.beforeEach(() => {
+  mock.method(globalThis, "fetch", (input: string | URL | Request, init?: RequestInit) => {
+    const url = input instanceof Request ? input.url : String(input);
+    if (url.endsWith("/api/v1/ingest/policy")) {
+      return Promise.resolve(Response.json({ etag: "new-policy", ttlSeconds: 900, captureLevel: "metadata", workspaces: [] }));
+    }
+    return fetchOriginal(input, init);
+  });
+});
+test.afterEach(() => mock.restoreAll());
+
+test("reconnect cannot use the previous device policy when refresh fails", async (t) => {
+  const home = tmpHome();
+  const pluginData = tmpPluginData();
+  const previous = { token: "old-token", ingestUrl: "https://api.example/api/v1/ingest/batches", deviceId: "old-device" };
+  saveConfig(pluginData, previous);
+  saveFreshPolicy(pluginData);
+  writePendingConfig(home, { ...previous, token: "new-token", deviceId: "new-device" });
+  let requests = 0;
+  t.mock.method(globalThis, "fetch", () => {
+    requests++;
+    return Promise.resolve(new Response(null, { status: 503 }));
+  });
+
+  await promotePendingConfig(home, pluginData, "https://api.example");
+
+  assert.equal(requests, 1);
+  assert.equal(loadPolicy(pluginData), null);
+  assert.ok(existsSync(pendingConfigPath(home)));
+  assert.equal(activationStatus(pluginData), "paired-awaiting-new-session");
+});
 
 function tmpHome(): string {
   return mkdtempSync(join(tmpdir(), "trinity-codex-home-"));

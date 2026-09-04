@@ -26,6 +26,14 @@ export function targetKey(target) {
 export function targetKeyForPluginData(pluginDataDir) {
     return targetKey(basename(pluginDataDir));
 }
+function targetKeyForMain(targetArg, pluginDataDir) {
+    const target = targetArg?.trim();
+    if (target)
+        return targetKey(target);
+    if (pluginDataDir)
+        return targetKeyForPluginData(pluginDataDir);
+    return targetKey(DEFAULT_TARGET);
+}
 export function pendingConfigPath(home, key = targetKey(DEFAULT_TARGET)) {
     return join(home, CAPTURE_DIR, `pending-device-v2-${key}.json`);
 }
@@ -129,8 +137,8 @@ async function main() {
     }
     const home = codexHome(process.env);
     const arg = process.argv[2]?.trim() ?? "";
-    const key = targetKey(process.argv[3]?.trim() ?? DEFAULT_TARGET);
-    const pluginDataDir = process.env.PLUGIN_DATA ?? process.env.TRINITY_CAPTURE_DATA;
+    const pluginDataDir = process.env.TRINITY_CAPTURE_DATA ?? process.env.PLUGIN_DATA;
+    const key = targetKeyForMain(process.argv[3], pluginDataDir);
     if (arg === "--status") {
         if (pluginDataDir && printDataDirStatus(pluginDataDir))
             return;

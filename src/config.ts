@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export interface DeviceConfig {
@@ -51,6 +51,21 @@ export function loadConfig(dir: string): DeviceConfig | null {
 }
 
 export function saveConfig(dir: string, cfg: DeviceConfig): void {
+  const existing = loadConfig(dir);
+  if (existing === null || existing.deviceId !== cfg.deviceId) {
+    const sources = ["outbox", "active-sessions", "turnkeys"].filter((name) => existsSync(join(dir, name)));
+    if (sources.length > 0) {
+      const retired = join(dir, "retired", randomUUID());
+      mkdirSync(retired, { recursive: true, mode: 0o700 });
+      for (const name of sources) renameSync(join(dir, name), join(retired, name));
+    }
+    try {
+      unlinkSync(join(dir, "policy.json"));
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+    }
+    rmSync(join(dir, "github-repositories.json"), { force: true });
+  }
   writeJSON(dir, "config.json", cfg);
 }
 

@@ -35,6 +35,37 @@ function readDrops(dataDir: string): DropRecord[] {
 
 const cfg: DeviceConfig = { token: "tok", ingestUrl: "https://ingest.example/api/v1/ingest/batches", deviceId: "d1" };
 
+test("a drain only sends events owned by its paired device", async () => {
+  const dataDir = tmpDataDir();
+  const current = makeEvent("current-event");
+  appendEvent(dataDir, makeEvent("old-event"), "previous-device");
+  appendEvent(dataDir, current, cfg.deviceId);
+
+  await drainWithStubFetch(dataDir, ({ items }) => {
+    assert.deepEqual(items, [current]);
+    return storedResults(items);
+  });
+
+  assert.equal(readdirSync(join(dataDir, "outbox")).length, 1);
+});
+
+test("reconnecting quarantines legacy queued events without deleting them", async () => {
+  const dataDir = tmpDataDir();
+  saveConfig(dataDir, { ...cfg, deviceId: "previous-device" });
+  const previous = makeEvent("legacy-event");
+  appendEvent(dataDir, previous);
+
+  saveConfig(dataDir, cfg);
+  await drainWithStubFetch(dataDir, () => assert.fail("old-device events must not be transmitted"));
+
+  assert.equal(readdirSync(join(dataDir, "outbox")).length, 0);
+  const retired = readdirSync(join(dataDir, "retired"));
+  assert.equal(retired.length, 1);
+  const oldOutbox = join(dataDir, "retired", retired[0], "outbox");
+  const files = readdirSync(oldOutbox);
+  assert.deepEqual(JSON.parse(readFileSync(join(oldOutbox, files[0]), "utf8")), previous);
+});
+
 function batchBody(init?: RequestInit): BatchBody {
   return JSON.parse(String(init?.body)) as BatchBody;
 }
