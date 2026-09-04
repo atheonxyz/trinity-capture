@@ -172,6 +172,8 @@ export async function runHook(dialect, event, stdin, env) {
     });
     if (!route.send)
         return; // not allowlisted, or policy missing/still stale — no event, no drain
+    if (loadConfig(dataDir)?.deviceId !== cfg.deviceId)
+        return;
     const repoCwd = repoRelativeCwd(cwd);
     const turnKey = sessionId === "" || dialect.isSessionStart(event)
         ? undefined
@@ -187,11 +189,11 @@ export async function runHook(dialect, event, stdin, env) {
         ...(turnKey === undefined ? {} : { turnKey }),
         payload: filterPayload(payload, dialect.allow(event)),
     };
-    appendEvent(dataDir, captureEvent);
+    appendEvent(dataDir, captureEvent, cfg.deviceId);
     if (dialect.isSessionStart(event)) {
         const observed = workspaceObserved(cwd);
         if (observed) {
-            appendEvent(dataDir, { ...observed, tool: dialect.tool, externalSessionId: sessionId, repo: route.canonicalRepo, repoCwd });
+            appendEvent(dataDir, { ...observed, tool: dialect.tool, externalSessionId: sessionId, repo: route.canonicalRepo, repoCwd }, cfg.deviceId);
         }
     }
     // Whether THIS event drains at all is the dialect's call (a synchronous

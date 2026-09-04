@@ -7,11 +7,28 @@ import { exchange } from "../src/connect.js";
 import { refreshPolicy, REQUEST_TIMEOUT_MS, sendBatch } from "../src/send.js";
 import type { CaptureEvent } from "../src/outbox.js";
 import type { DeviceConfig } from "../src/config.js";
+import { loadPolicy, saveConfig } from "../src/config.js";
+
+test("an in-flight old-device policy cannot overwrite a replacement pairing", async (t) => {
+  const dataDir = mkdtempSync(join(tmpdir(), "trinity-network-data-"));
+  const cfg = { token: "old", ingestUrl: "https://ingest.example/api/v1/ingest/batches", deviceId: "old" };
+  saveConfig(dataDir, cfg);
+  t.mock.method(globalThis, "fetch", async () => {
+    saveConfig(dataDir, { ...cfg, token: "new", deviceId: "new" });
+    return Response.json({ etag: "old", ttlSeconds: 900, captureLevel: "metadata", workspaces: [] });
+  });
+
+  const policy = await refreshPolicy(dataDir, cfg);
+
+  assert.equal(policy, null);
+  assert.equal(loadPolicy(dataDir), null);
+});
 
 test("plugin HTTP requests carry a bounded abort signal", async () => {
   assert.equal(REQUEST_TIMEOUT_MS, 5_000);
   const dataDir = mkdtempSync(join(tmpdir(), "trinity-network-data-"));
   const cfg: DeviceConfig = { token: "tok", ingestUrl: "https://ingest.example/api/v1/ingest/batches", deviceId: "dev1" };
+  saveConfig(dataDir, cfg);
   const event: CaptureEvent = {
     captureEventId: "11111111-1111-4111-8111-111111111111",
     tool: "claude_code",

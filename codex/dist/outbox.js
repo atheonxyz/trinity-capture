@@ -79,8 +79,9 @@ function enforceOutboxLimit(dataDir, dir) {
         }
     }
 }
-export function appendEvent(dataDir, ev) {
-    const line = JSON.stringify(ev) + "\n";
+export function appendEvent(dataDir, ev, deviceId) {
+    const stored = deviceId === undefined ? ev : { ...ev, _deviceId: deviceId };
+    const line = JSON.stringify(stored) + "\n";
     if (Buffer.byteLength(line, "utf8") > MAX_EVENT_BYTES) {
         recordDrop(dataDir, { reason: "oversized", captureEventId: ev.captureEventId, kind: ev.kind });
         return false;
@@ -130,7 +131,9 @@ export async function drain(dataDir, cfg, options = { inline: false, deadline: 0
             recordDrop(dataDir, { reason: "expired", captureEventId: event.captureEventId, kind: event.kind });
             continue;
         }
-        entries.push({ file, bytes: Buffer.byteLength(raw, "utf8"), event });
+        if (event._deviceId === undefined || event._deviceId === cfg.deviceId) {
+            entries.push({ file, bytes: Buffer.byteLength(raw, "utf8"), event });
+        }
     }
     let offset = 0;
     let policyStale = false;
@@ -168,7 +171,10 @@ async function deliverBatch(dir, dataDir, cfg, entries, options) {
         const remaining = options.inline ? options.deadline - Date.now() : undefined;
         if (remaining !== undefined && remaining <= 0)
             return "abort";
-        results = await sendBatch(cfg, entries.map((e) => e.event), remaining);
+        results = await sendBatch(cfg, entries.map(({ event }) => {
+            const { _deviceId: _, ...wireEvent } = event;
+            return wireEvent;
+        }), remaining);
     }
     catch (err) {
         if (err instanceof BatchRequestError && err.status === 413) {
