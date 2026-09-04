@@ -75,26 +75,47 @@ export const cursorDialect = {
     drainsOn: (event) => event === "afterAgentResponse" || event === "sessionEnd",
     allow: (event) => [...ALLOW_EVERY_EVENT, ...(ALLOW_PER_EVENT[event] ?? [])],
     drainInline: true,
-    dataDir: (env) => resolveDataDir(env),
+    dataDir: (env) => cursorDataDir(env),
 };
 // Cursor's docs and capture expose no CURSOR_PLUGIN_DATA equivalent (unlike
 // CURSOR_PLUGIN_ROOT, which does exist and locates the installed plugin's
 // own files — see hooks/hooks.json). Credentials therefore live in the
 // secured per-user application-data location instead, exactly like a
 // desktop app would, overridable for local builds and non-default hosts.
-function resolveDataDir(env) {
+function cursorChannel(env) {
+    const root = env.CURSOR_PLUGIN_ROOT;
+    if (!root)
+        return "cursor";
+    try {
+        const parsed = JSON.parse(readFileSync(join(root, ".cursor-plugin", "plugin.json"), "utf8"));
+        if (typeof parsed !== "object" || parsed === null || !("name" in parsed))
+            return "cursor";
+        const name = parsed.name;
+        const suffix = typeof name === "string" && /^trinity-capture-[a-z0-9-]+$/.test(name)
+            ? name.slice("trinity-capture-".length)
+            : "";
+        return suffix === "" ? "cursor" : `cursor-${suffix}`;
+    }
+    catch (error) {
+        if (error instanceof Error)
+            return "cursor";
+        throw error;
+    }
+}
+export function cursorDataDir(env) {
     if (env.TRINITY_CAPTURE_DATA)
         return env.TRINITY_CAPTURE_DATA;
+    const channel = cursorChannel(env);
     switch (platform()) {
         case "darwin":
-            return join(homedir(), "Library", "Application Support", "Trinity Capture", "cursor");
+            return join(homedir(), "Library", "Application Support", "Trinity Capture", channel);
         case "win32": {
             const base = env.LOCALAPPDATA;
-            return base ? join(base, "Trinity Capture", "cursor") : null;
+            return base ? join(base, "Trinity Capture", channel) : null;
         }
         default: {
             const base = env.XDG_STATE_HOME && env.XDG_STATE_HOME !== "" ? env.XDG_STATE_HOME : join(homedir(), ".local", "state");
-            return join(base, "trinity-capture", "cursor");
+            return join(base, "trinity-capture", channel);
         }
     }
 }
