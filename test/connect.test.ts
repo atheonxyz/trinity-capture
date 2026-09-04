@@ -6,7 +6,8 @@ import { existsSync, mkdtempSync, symlinkSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { saveConfig } from "../src/config.js";
+import { loadConfig, saveConfig } from "../src/config.js";
+import { activationStatus } from "../src/activation.js";
 
 type TestServer = {
   readonly baseUrl: string;
@@ -74,6 +75,7 @@ test("pairing fetches the initial policy before reporting the device connected",
     assert.equal(await runConnect(dataDir, server.baseUrl, "ABCD1234EFGH"), 0);
     assert.deepEqual(server.requests, ["POST /api/v1/devices/exchange", "GET /api/v1/ingest/policy"]);
     assert.equal(existsSync(join(dataDir, "policy.json")), true);
+    assert.equal(activationStatus(dataDir), "paired-awaiting-new-session");
   } finally {
     await server.close();
   }
@@ -85,6 +87,20 @@ test("pairing accepts Claude's substituted plugin data directory", async () => {
   try {
     assert.equal(await runConnect(dataDir, server.baseUrl, "ABCD1234EFGH", true), 0);
     assert.equal(existsSync(join(dataDir, "config.json")), true);
+  } finally {
+    await server.close();
+  }
+});
+
+test("pairing preserves a Claude connection to a different Trinity environment", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "trinity-connect-data-"));
+  const server = await startServer();
+  const existing = { token: "existing", deviceId: "production", ingestUrl: "https://api.usetrinity.ai/api/v1/ingest/batches" };
+  saveConfig(dataDir, existing);
+  try {
+    assert.equal(await runConnect(dataDir, server.baseUrl, "ABCD1234EFGH"), 1);
+    assert.deepEqual(loadConfig(dataDir), existing);
+    assert.equal(existsSync(join(dataDir, "activation.json")), false);
   } finally {
     await server.close();
   }
@@ -102,6 +118,7 @@ test("running connect without a new code retries policy sync for an existing dev
     assert.equal(await runConnect(dataDir, server.baseUrl), 0);
     assert.deepEqual(server.requests, ["GET /api/v1/ingest/policy"]);
     assert.equal(existsSync(join(dataDir, "policy.json")), true);
+    assert.equal(activationStatus(dataDir), "ready");
   } finally {
     await server.close();
   }

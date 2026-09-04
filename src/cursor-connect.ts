@@ -3,6 +3,7 @@ import { platform } from "node:os";
 import { join } from "node:path";
 import { cursorDialect } from "./cursor-hook.js";
 import { exchange } from "./connect.js";
+import { activationStatus, markPairedAwaitingNewSession } from "./activation.js";
 import { loadConfig, saveConfig, type DeviceConfig } from "./config.js";
 import { isPolicyFresh } from "./gate.js";
 import { isMainModule } from "./main-module.js";
@@ -29,6 +30,7 @@ async function saveCursorConnection(dataDir: string, cfg: DeviceConfig): Promise
   if (existing !== null && new URL(existing.ingestUrl).origin !== new URL(cfg.ingestUrl).origin) {
     throw new Error("Existing Trinity connection kept. Disconnect before switching Trinity environments.");
   }
+  markPairedAwaitingNewSession(dataDir, cfg.deviceId);
   saveConfig(dataDir, cfg);
   securePosixMode(join(dataDir, "config.json"), 0o600);
   const policy = await refreshPolicy(dataDir, cfg);
@@ -98,7 +100,7 @@ async function main(): Promise<void> {
     } else {
       await connectCursor(baseUrl, code, dataDir);
     }
-    console.log("Trinity connected. This device now captures sessions for allowlisted repositories.");
+    console.log(`Trinity status: ${activationStatus(dataDir)}. Start a new Cursor session in an enabled repository to begin capture.`);
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err));
     process.exitCode = 1;

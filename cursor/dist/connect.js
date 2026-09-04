@@ -1,4 +1,5 @@
 import { loadConfig, saveConfig } from "./config.js";
+import { activationStatus, markPairedAwaitingNewSession } from "./activation.js";
 import { isPolicyFresh } from "./gate.js";
 import { isMainModule } from "./main-module.js";
 import { refreshPolicy, REQUEST_TIMEOUT_MS } from "./send.js";
@@ -43,6 +44,10 @@ async function main() {
         let cfg;
         if (hasPairingCode) {
             cfg = await exchange(baseUrl, code);
+            if (existingConfig && new URL(existingConfig.ingestUrl).origin !== new URL(cfg.ingestUrl).origin) {
+                throw new Error("Existing Trinity connection kept. Use a separate plugin connection to test another environment.");
+            }
+            markPairedAwaitingNewSession(dataDir, cfg.deviceId);
             saveConfig(dataDir, cfg);
         }
         else {
@@ -59,7 +64,15 @@ async function main() {
             process.exitCode = 1;
             return;
         }
-        console.log(hasPairingCode ? "Trinity connected. Exit Claude Code and start a new session in an enabled repository to begin capture." : "Trinity capture policy refreshed.");
+        const status = activationStatus(dataDir);
+        if (status === "needs-repair") {
+            console.error("Trinity connection needs repair. Generate a new pairing code and run /trinity:connect <pairing-code>.");
+            process.exitCode = 1;
+            return;
+        }
+        console.log(hasPairingCode
+            ? `Trinity paired (${status}). Start a new Claude Code session in an enabled repository to begin capture.`
+            : `Trinity status: ${status}.`);
     }
     catch (err) {
         console.error(err instanceof Error ? err.message : String(err));

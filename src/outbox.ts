@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DeviceConfig } from "./config.js";
+import { markCaptured } from "./activation.js";
 import type { ItemResult } from "./send.js";
 import { BatchRequestError, refreshPolicy, sendBatch } from "./send.js";
 
@@ -107,20 +108,21 @@ function enforceOutboxLimit(dataDir: string, dir: string): void {
   }
 }
 
-export function appendEvent(dataDir: string, ev: CaptureEvent): void {
+export function appendEvent(dataDir: string, ev: CaptureEvent): boolean {
   const line = JSON.stringify(ev) + "\n";
   if (Buffer.byteLength(line, "utf8") > MAX_EVENT_BYTES) {
     recordDrop(dataDir, { reason: "oversized", captureEventId: ev.captureEventId, kind: ev.kind });
-    return;
+    return false;
   }
   const dir = outboxDir(dataDir);
   try {
     writeFileSync(fileFor(dir, ev), line, { flag: "wx" });
   } catch (err) {
-    if (isAlreadyQueued(err)) return;
+    if (isAlreadyQueued(err)) return true;
     throw err;
   }
   enforceOutboxLimit(dataDir, dir);
+  return true;
 }
 
 export interface DrainOptions {
@@ -229,6 +231,7 @@ async function deliverBatch(
     if (result === undefined) continue;
     if (result.outcome === "stored" || result.outcome === "duplicate" || result.outcome === "rejected_permanent") {
       rmSync(join(dir, file), { force: true });
+      if (result.outcome === "stored" || result.outcome === "duplicate") markCaptured(dataDir, cfg.deviceId);
     } else if (result.outcome === "retry_later" && result.code === "policy_stale") {
       policyStale = true;
     }

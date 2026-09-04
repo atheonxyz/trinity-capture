@@ -90,19 +90,13 @@ async function cli(): Promise<void> {
   if (!eventName) return;
   const stdin = readFileSync(0, "utf8");
 
-  // The connect skill's shell command has no PLUGIN_DATA (C2.0); this hook
-  // COMMAND does, so it's the one that promotes a pending pairing on its
-  // way through — cheap when nothing is pending, and best-effort: a
-  // promotion failure must never surface to the IDE.
-  if (eventName === "PostToolUse") {
-    try {
-      const dataDir = codexDialect.dataDir(process.env);
-      if (dataDir) {
-        await promotePendingConfig(codexHome(process.env), dataDir, process.env.TRINITY_BASE_URL ?? DEFAULT_BASE_URL);
-      }
-    } catch (error) {
-      if (!(error instanceof Error)) throw error;
+  try {
+    const dataDir = codexDialect.dataDir(process.env);
+    if (dataDir) {
+      await promotePendingConfig(codexHome(process.env), dataDir, process.env.TRINITY_BASE_URL ?? DEFAULT_BASE_URL);
     }
+  } catch (error) {
+    if (!(error instanceof Error)) throw error;
   }
 
   await runHook(codexDialect, eventName, stdin, process.env);

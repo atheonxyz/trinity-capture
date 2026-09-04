@@ -45,3 +45,9 @@ export function loadPolicy(dir) {
 export function savePolicy(dir, policy) {
     writeJSON(dir, "policy.json", policy);
 }
+export function saveActivation(dir, value) {
+    writeJSON(dir, "activation.json", value);
+}
+export function saveGitHubRepositoryCache(dir, value) {
+    writeJSON(dir, "github-repositories.json", value);
+}

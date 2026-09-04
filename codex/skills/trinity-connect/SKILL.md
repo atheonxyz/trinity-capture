@@ -11,8 +11,8 @@ Connect this Codex installation with the short-lived pairing code the user provi
 2. Ask to run the next command outside the Codex sandbox. It needs network access to
    exchange the code and writes the device credential under `~/.codex`; never print
    the pairing code.
-3. Run `node "<pluginRoot>/dist/codex-connect.js" <pairing-code>`.
-4. Run `node "<pluginRoot>/dist/codex-connect.js" --status` separately. If it is
+3. Run `node "<pluginRoot>/dist/codex-connect.js" <pairing-code> trinity-capture@trinity`.
+4. Run `node "<pluginRoot>/dist/codex-connect.js" --status trinity-capture@trinity` separately. If it is
    pending, wait one second and retry up to five times while this plugin's
    PostToolUse hook promotes the credential into its own data directory.
 5. Report the final status output as-is. When connected, tell the user to start a

@@ -5,8 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appendEvent, drain } from "../src/outbox.js";
 import type { CaptureEvent, DropRecord } from "../src/outbox.js";
-import type { DeviceConfig } from "../src/config.js";
+import { saveConfig, type DeviceConfig } from "../src/config.js";
 import type { ItemResult } from "../src/send.js";
+import { activationStatus, markPairedAwaitingNewSession } from "../src/activation.js";
 
 type BatchBody = { readonly items: CaptureEvent[] };
 
@@ -99,6 +100,18 @@ test("drain deletes acknowledged events and keeps retry_later ones", async () =>
   const remaining = readdirSync(join(dataDir, "outbox"));
   assert.equal(remaining.length, 1);
   assert.match(remaining[0], new RegExp(e2.captureEventId));
+});
+
+test("drain marks a device captured only after an acknowledged delivery", async () => {
+  const dataDir = tmpDataDir();
+  markPairedAwaitingNewSession(dataDir, cfg.deviceId);
+  saveConfig(dataDir, cfg);
+  appendEvent(dataDir, makeEvent("23232323-2323-2323-2323-232323232323"));
+  assert.equal(activationStatus(dataDir), "paired-awaiting-new-session");
+
+  await drainWithStubFetch(dataDir, (body) => storedResults(body.items));
+
+  assert.equal(activationStatus(dataDir), "captured");
 });
 
 test("drain retains the whole outbox on a request-level failure", async () => {

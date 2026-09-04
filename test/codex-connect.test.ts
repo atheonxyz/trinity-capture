@@ -1,21 +1,32 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { exchange } from "../src/connect.js";
-import { codexHome, pendingConfigPath, promotePendingConfig, writePendingConfig } from "../src/codex-connect.js";
-import { loadConfig, savePolicy } from "../src/config.js";
+import { codexHome, confirmedConfigPath, pendingConfigPath, promotePendingConfig, targetKeyForPluginData, writePendingConfig } from "../src/codex-connect.js";
+import { loadConfig, saveConfig, savePolicy } from "../src/config.js";
 import type { DeviceConfig } from "../src/config.js";
+import { activationStatus } from "../src/activation.js";
 
 function tmpHome(): string {
   return mkdtempSync(join(tmpdir(), "trinity-codex-home-"));
 }
 
 function tmpPluginData(): string {
-  return mkdtempSync(join(tmpdir(), "trinity-codex-plugindata-"));
+  const parent = mkdtempSync(join(tmpdir(), "trinity-codex-plugindata-"));
+  const dir = join(parent, "trinity-capture-trinity");
+  mkdirSync(dir);
+  return dir;
+}
+
+function tmpPluginDataWithKey(key: string): string {
+  const parent = mkdtempSync(join(tmpdir(), "trinity-codex-plugindata-"));
+  const dir = join(parent, key);
+  mkdirSync(dir);
+  return dir;
 }
 
 function mode(path: string): number {
@@ -89,10 +100,11 @@ test("the full connect flow: exchange against a stub server, write pending, prom
   await promotePendingConfig(home, pluginData, "https://api.example");
 
   assert.ok(!existsSync(pendingConfigPath(home)), "promotion must remove the pending file");
-  assert.ok(existsSync(join(home, "trinity-capture", "connected-device.json")), "promotion must write a confirmation marker");
+  assert.ok(existsSync(confirmedConfigPath(home, targetKeyForPluginData(pluginData))), "promotion must write a confirmation marker");
   const configPath = join(pluginData, "config.json");
   assert.ok(existsSync(configPath), "promotion must write PLUGIN_DATA/config.json");
   assert.equal(mode(configPath), 0o600, "the promoted credential file must be mode 0600");
+  assert.equal(activationStatus(pluginData), "paired-awaiting-new-session");
 
   const readBack = loadConfig(pluginData);
   assert.deepEqual(readBack, cfg, "read-back through config.ts's own loadConfig must succeed");
@@ -160,6 +172,64 @@ test("promotePendingConfig leaves a malformed pending record in place for a late
 
   assert.ok(existsSync(pendingConfigPath(home)), "an incomplete DeviceConfig must not be promoted");
   assert.ok(!existsSync(join(pluginData, "config.json")));
+});
+
+test("promotion ignores the legacy pending filename so stale hooks cannot consume a new pairing", async () => {
+  const home = tmpHome();
+  const pluginData = tmpPluginData();
+  const legacy = join(home, "trinity-capture", "pending-device.json");
+  mkdirSync(join(home, "trinity-capture"), { recursive: true });
+  writeFileSync(legacy, JSON.stringify({
+    token: "legacy",
+    ingestUrl: "https://api.usetrinity.ai/api/v1/ingest/batches",
+    deviceId: "legacy-device",
+  }));
+
+  await promotePendingConfig(home, pluginData);
+
+  assert.ok(existsSync(legacy));
+  assert.ok(!existsSync(join(pluginData, "config.json")));
+});
+
+test("promotion keeps an existing different-environment config and pending record untouched", async () => {
+  const home = tmpHome();
+  const pluginData = tmpPluginData();
+  const existing: DeviceConfig = {
+    token: "staging-token",
+    ingestUrl: "https://api-staging.usetrinity.ai/api/v1/ingest/batches",
+    deviceId: "staging-device",
+  };
+  saveConfig(pluginData, existing);
+  writePendingConfig(home, {
+    token: "prod-token",
+    ingestUrl: "https://api.usetrinity.ai/api/v1/ingest/batches",
+    deviceId: "prod-device",
+  });
+  await promotePendingConfig(home, pluginData, "https://api.usetrinity.ai");
+
+  assert.deepEqual(loadConfig(pluginData), existing);
+  assert.ok(existsSync(pendingConfigPath(home)));
+});
+
+test("promotion is scoped to the hook's plugin data identity", async () => {
+  const home = tmpHome();
+  const prodData = tmpPluginDataWithKey("trinity-capture-trinity");
+  const stageData = tmpPluginDataWithKey("trinity-capture-trinity-staging");
+  const prodKey = targetKeyForPluginData(prodData);
+  const stageKey = targetKeyForPluginData(stageData);
+  const prod: DeviceConfig = { token: "prod", ingestUrl: "https://api.usetrinity.ai/api/v1/ingest/batches", deviceId: "prod-device" };
+  const stage: DeviceConfig = { token: "stage", ingestUrl: "https://api-staging.usetrinity.ai/api/v1/ingest/batches", deviceId: "stage-device" };
+  writePendingConfig(home, prod, prodKey);
+  writePendingConfig(home, stage, stageKey);
+  saveFreshPolicy(prodData);
+  saveFreshPolicy(stageData);
+
+  await promotePendingConfig(home, stageData, "https://api-staging.usetrinity.ai");
+
+  assert.deepEqual(loadConfig(stageData), stage);
+  assert.ok(!existsSync(pendingConfigPath(home, stageKey)));
+  assert.ok(existsSync(pendingConfigPath(home, prodKey)));
+  assert.equal(loadConfig(prodData), null);
 });
 
 test("an untrusted/disabled hook leaves the pending record for the next trusted invocation, which then promotes it", async () => {

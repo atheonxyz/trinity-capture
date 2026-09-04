@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { claudeCodeDialect } from "../src/claude-hook.js";
@@ -23,7 +23,7 @@ function initRepo(remote: string): string {
   return dir;
 }
 
-test("an unmatched repository makes no policy request when the cache is stale", async () => {
+test("an unmatched repository may refresh policy but sends no session events", async () => {
   const dataDir = mkdtempSync(join(tmpdir(), "trinity-privacy-data-"));
   saveConfig(dataDir, { token: "tok", ingestUrl: "https://ingest.example/api/v1/ingest/batches", deviceId: "dev1" });
   savePolicy(dataDir, {
@@ -34,10 +34,12 @@ test("an unmatched repository makes no policy request when the cache is stale", 
     workspaces: [{ canonicalRepo: "github.com/acme/work", aliases: [], route: "project:p1" }],
   });
   const repo = initRepo("git@github.com:personal/private.git");
-  let requests = 0;
+  let policyRequests = 0;
+  let batchRequests = 0;
   const original = globalThis.fetch;
-  globalThis.fetch = (async () => {
-    requests += 1;
+  globalThis.fetch = (async (url: string | URL) => {
+    if (String(url).endsWith("/policy")) policyRequests += 1;
+    if (String(url).endsWith("/batches")) batchRequests += 1;
     return new Response(null, { status: 503 });
   }) as typeof fetch;
   try {
@@ -49,5 +51,7 @@ test("an unmatched repository makes no policy request when the cache is stale", 
     globalThis.fetch = original;
   }
 
-  assert.equal(requests, 0);
+  assert.equal(policyRequests, 1);
+  assert.equal(batchRequests, 0);
+  assert.equal(existsSync(join(dataDir, "outbox")), false);
 });

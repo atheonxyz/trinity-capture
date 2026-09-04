@@ -10,7 +10,8 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync } from "no
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { saveConfig, savePolicy } from "../src/config.js";
-import { writePendingConfig, pendingConfigPath } from "../src/codex-connect.js";
+import { writePendingConfig, pendingConfigPath, targetKeyForPluginData } from "../src/codex-connect.js";
+import { activationStatus } from "../src/activation.js";
 
 // pnpm test always runs from the repository root.
 const hookBin = join(process.cwd(), "codex", "dist", "codex-hook.js");
@@ -90,7 +91,7 @@ test("committed binary, authorized + allowlisted: appends the SessionStart pair 
   assert.deepEqual(kinds, ["SessionStart", "workspace.observed"]);
 });
 
-test("committed binary, PostToolUse: promotes a pending device config into PLUGIN_DATA and removes it", () => {
+test("committed binary, PostToolUse: promotes a pending device config but suppresses the setup session", () => {
   const dataDir = mkdtempSync(join(tmpdir(), "trinity-codex-pkg-data-"));
   const codexHome = mkdtempSync(join(tmpdir(), "trinity-codex-pkg-home-"));
   const repo = initRepo("git@github.com:acme/widgets.git");
@@ -99,8 +100,9 @@ test("committed binary, PostToolUse: promotes a pending device config into PLUGI
   // separately, end to end through the real exchange(), in
   // codex-connect.test.ts) so this test isolates what's packaging-specific:
   // the COMMITTED dist codex-hook.js's own PostToolUse promotion step.
-  writePendingConfig(codexHome, { token: "tok", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev1" });
-  const pending = pendingConfigPath(codexHome);
+  const key = targetKeyForPluginData(dataDir);
+  writePendingConfig(codexHome, { token: "tok", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev1" }, key);
+  const pending = pendingConfigPath(codexHome, key);
   assert.ok(existsSync(pending));
 
   const stdin = loadFixtureLine("PostToolUse");
@@ -121,6 +123,33 @@ test("committed binary, PostToolUse: promotes a pending device config into PLUGI
   const configPath = join(dataDir, "config.json");
   assert.ok(existsSync(configPath), "promotion must land PLUGIN_DATA/config.json");
   assert.equal(statSync(configPath).mode & 0o777, 0o600);
+  assert.equal(activationStatus(dataDir), "paired-awaiting-new-session");
+  assert.ok(!existsSync(join(dataDir, "outbox")), "the setup tool event must not be captured after promotion");
+});
+
+test("committed binary, pending device can promote and capture on the first new SessionStart", () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "trinity-codex-pkg-data-"));
+  const codexHome = mkdtempSync(join(tmpdir(), "trinity-codex-pkg-home-"));
+  const repo = initRepo("git@github.com:acme/widgets.git");
+  writePendingConfig(codexHome, { token: "tok", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev1" }, targetKeyForPluginData(dataDir));
+  savePolicy(dataDir, {
+    etag: "e1",
+    fetchedAt: Date.now(),
+    ttlSeconds: 900,
+    captureLevel: "metadata",
+    workspaces: [{ canonicalRepo: "github.com/acme/widgets", aliases: [], route: "project:p1" }],
+  });
+
+  const stdin = loadFixtureLine("SessionStart");
+  stdin.cwd = repo;
+  execFileSync("node", [hookBin, "SessionStart"], {
+    input: JSON.stringify(stdin),
+    env: { ...process.env, PLUGIN_DATA: dataDir, CODEX_HOME: codexHome, TRINITY_BASE_URL: "http://127.0.0.1:1" },
+  });
+
+  assert.ok(!existsSync(pendingConfigPath(codexHome, targetKeyForPluginData(dataDir))));
+  assert.equal(activationStatus(dataDir), "ready");
+  assert.equal(readdirSync(join(dataDir, "outbox")).length, 2);
 });
 
 test("the repo-root marketplace manifest names trinity-capture at the packaged codex plugin dir", () => {

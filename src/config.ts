@@ -13,7 +13,7 @@ export interface Policy {
   fetchedAt: number;
   ttlSeconds: number;
   captureLevel: "metadata";
-  workspaces: { canonicalRepo: string; aliases: string[]; route: string }[];
+  workspaces: { canonicalRepo: string; githubRepositoryId?: number; aliases: string[]; route: string }[];
 }
 
 function readJSON<T>(path: string): T | null {
@@ -60,4 +60,12 @@ export function loadPolicy(dir: string): Policy | null {
 
 export function savePolicy(dir: string, policy: Policy): void {
   writeJSON(dir, "policy.json", policy);
+}
+
+export function saveActivation(dir: string, value: unknown): void {
+  writeJSON(dir, "activation.json", value);
+}
+
+export function saveGitHubRepositoryCache(dir: string, value: unknown): void {
+  writeJSON(dir, "github-repositories.json", value);
 }

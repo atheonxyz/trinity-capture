@@ -11,7 +11,7 @@
     {
       "name": "trinity-capture",
       "description": "Captures Cursor coding sessions into Trinity for allowlisted repositories.",
-      "version": "0.3.1",
+      "version": "0.3.2",
       "source": "./cursor",
       "author": { "name": "Trinity", "email": "hi@usetrinity.ai" },
       "homepage": "https://usetrinity.ai",

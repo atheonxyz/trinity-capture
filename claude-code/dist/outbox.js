@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { markCaptured } from "./activation.js";
 import { BatchRequestError, refreshPolicy, sendBatch } from "./send.js";
 const MAX_BATCHES = 5;
 export const INLINE_DRAIN_BUDGET_MS = 2_000;
@@ -82,7 +83,7 @@ export function appendEvent(dataDir, ev) {
     const line = JSON.stringify(ev) + "\n";
     if (Buffer.byteLength(line, "utf8") > MAX_EVENT_BYTES) {
         recordDrop(dataDir, { reason: "oversized", captureEventId: ev.captureEventId, kind: ev.kind });
-        return;
+        return false;
     }
     const dir = outboxDir(dataDir);
     try {
@@ -90,10 +91,11 @@ export function appendEvent(dataDir, ev) {
     }
     catch (err) {
         if (isAlreadyQueued(err))
-            return;
+            return true;
         throw err;
     }
     enforceOutboxLimit(dataDir, dir);
+    return true;
 }
 export async function drain(dataDir, cfg, options = { inline: false, deadline: 0 }) {
     if (options.inline && Date.now() >= options.deadline)
@@ -194,6 +196,8 @@ async function deliverBatch(dir, dataDir, cfg, entries, options) {
             continue;
         if (result.outcome === "stored" || result.outcome === "duplicate" || result.outcome === "rejected_permanent") {
             rmSync(join(dir, file), { force: true });
+            if (result.outcome === "stored" || result.outcome === "duplicate")
+                markCaptured(dataDir, cfg.deviceId);
         }
         else if (result.outcome === "retry_later" && result.code === "policy_stale") {
             policyStale = true;

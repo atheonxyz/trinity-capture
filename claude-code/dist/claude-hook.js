@@ -179,6 +179,12 @@ export const claudeCodeDialect = {
     vendorTurnId: (_event, payload) => stringField(payload, "prompt_id"),
     isPromptSubmit: (event) => event === "UserPromptSubmit",
     isSessionStart: (event) => event === "SessionStart",
+    isFreshSessionStart: (event, payload) => {
+        if (event !== "SessionStart")
+            return false;
+        const source = stringField(payload, "source");
+        return source === "startup" || source === "clear" || source === "fork";
+    },
     // SessionEnd fires while the host tears the session down, so it stays
     // append-only; every other event drains within the inline budget.
     drainsOn: (event) => event !== "SessionEnd",

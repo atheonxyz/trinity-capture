@@ -6,7 +6,9 @@ import { randomUUID } from "node:crypto";
 import { linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig, loadPolicy } from "./config.js";
-import { isPolicyFresh, matchRoute, routeFor } from "./gate.js";
+import { allowSessionCapture } from "./activation.js";
+import { isPolicyFresh, resolveRoute } from "./gate.js";
+import { resolveGitHubRepository } from "./github-repo.js";
 import { appendEvent, drain, INLINE_DRAIN_BUDGET_MS } from "./outbox.js";
 import { gitRemoteOf, repoRelativeCwd, workspaceObserved } from "./observe.js";
 import { refreshPolicy } from "./send.js";
@@ -140,18 +142,21 @@ export async function runHook(dialect, event, stdin, env) {
     const cfg = loadConfig(dataDir);
     if (!cfg)
         return; // never authorized — fail closed, zero network requests
-    // Self-healing happens before the gate, not after: routeFor already
-    // fails closed on a stale policy, so a refresh attempted only once
-    // send:false has been decided can never run. Scoped to the dialect's own
-    // session-start moment, not a literal event name — hook-core carries no
-    // vendor vocabulary of its own.
+    const sessionId = dialect.sessionId(event, payload) ?? "";
+    if (!allowSessionCapture({
+        dataDir,
+        tool: dialect.tool,
+        sessionId,
+        deviceId: cfg.deviceId,
+        isSessionStart: dialect.isSessionStart(event),
+        isFreshSessionStart: dialect.isFreshSessionStart?.(event, payload) ?? dialect.isSessionStart(event),
+    }))
+        return;
     const cwd = dialect.cwd(event, payload) ?? process.cwd();
     const gitRemote = gitRemoteOf(cwd);
     let policy = loadPolicy(dataDir);
-    if (!matchRoute(policy, gitRemote).send)
-        return;
+    const remaining = dialect.drainInline ? hookEntryDeadline - Date.now() : undefined;
     if (dialect.isSessionStart(event) && !isPolicyFresh(policy, Date.now())) {
-        const remaining = dialect.drainInline ? hookEntryDeadline - Date.now() : undefined;
         if (remaining === undefined || remaining > 0) {
             try {
                 policy = await refreshPolicy(dataDir, cfg, remaining);
@@ -161,10 +166,12 @@ export async function runHook(dialect, event, stdin, env) {
             }
         }
     }
-    const route = routeFor(policy, Date.now(), gitRemote);
+    const route = await resolveRoute(policy, gitRemote, (fullName) => {
+        const lookupBudget = dialect.drainInline ? hookEntryDeadline - Date.now() : 1_500;
+        return lookupBudget > 0 ? resolveGitHubRepository(dataDir, fullName, lookupBudget) : Promise.resolve(null);
+    });
     if (!route.send)
         return; // not allowlisted, or policy missing/still stale — no event, no drain
-    const sessionId = dialect.sessionId(event, payload) ?? "";
     const repoCwd = repoRelativeCwd(cwd);
     const turnKey = sessionId === "" || dialect.isSessionStart(event)
         ? undefined

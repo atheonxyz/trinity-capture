@@ -1,13 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { claimTurnKey, runHook, turnKeyDir } from "../src/hook-core.js";
 import type { Dialect } from "../src/hook-core.js";
 import { saveConfig, savePolicy } from "../src/config.js";
 import type { DeviceConfig, Policy } from "../src/config.js";
+import { activationStatus, markPairedAwaitingNewSession } from "../src/activation.js";
 
 function tmpDataDir(): string {
   return mkdtempSync(join(tmpdir(), "trinity-hookcore-"));
@@ -255,4 +256,142 @@ test("hook-core: isSessionStart, not a literal event name, gates the workspace.o
 
   await send("Other");
   assert.equal(readdirSync(join(dataDir, "outbox")).length, 3, "isSessionStart(false) must add only the main event, no workspace.observed");
+});
+
+test("hook-core: paired devices suppress current-session events until a fresh session start", async () => {
+  const dataDir = tmpDataDir();
+  const cfg: DeviceConfig = { token: "tok", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev1" };
+  saveConfig(dataDir, cfg);
+  savePolicy(dataDir, freshPolicy());
+  markPairedAwaitingNewSession(dataDir, cfg.deviceId);
+  const repo = initRepo("git@github.com:acme/widgets.git");
+  const dialect = fakeDialect({
+    isSessionStart: (event) => event === "Begin",
+    isFreshSessionStart: (event, payload) => event === "Begin" && payload.source === "fresh",
+    drainsOn: () => false,
+  });
+  const env = { ...process.env, TEST_HOOK_CORE_DATA_DIR: dataDir };
+
+  await runHook(dialect, "ToolCall", JSON.stringify({ session_id: "setup", cwd: repo, marker: "same-session" }), env);
+  assert.equal(activationStatus(dataDir), "paired-awaiting-new-session");
+  assert.equal(existsSync(join(dataDir, "outbox")), false);
+
+  await runHook(dialect, "Begin", JSON.stringify({ session_id: "resume", cwd: repo, source: "resume" }), env);
+  assert.equal(activationStatus(dataDir), "paired-awaiting-new-session");
+  assert.equal(existsSync(join(dataDir, "outbox")), false);
+
+  await runHook(dialect, "Begin", JSON.stringify({ session_id: "fresh", cwd: repo, source: "fresh" }), env);
+  assert.equal(activationStatus(dataDir), "ready");
+  assert.equal(readdirSync(join(dataDir, "outbox")).length, 2);
+
+  await runHook(dialect, "Begin", JSON.stringify({ session_id: "fresh", cwd: repo, source: "resume" }), env);
+  assert.equal(readdirSync(join(dataDir, "outbox")).length, 4);
+
+  await runHook(dialect, "ToolCall", JSON.stringify({ session_id: "setup", cwd: repo, marker: "old-setup-stop" }), env);
+  assert.equal(readdirSync(join(dataDir, "outbox")).length, 4);
+});
+
+test("hook-core: a stale credential cannot cross a new pairing epoch", async () => {
+  const dataDir = tmpDataDir();
+  const cfg: DeviceConfig = { token: "old", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "old-device" };
+  saveConfig(dataDir, cfg);
+  savePolicy(dataDir, freshPolicy());
+  markPairedAwaitingNewSession(dataDir, "new-device");
+  const repo = initRepo("git@github.com:acme/widgets.git");
+
+  await runHook(fakeDialect({ isSessionStart: (event) => event === "Begin" }), "Begin", JSON.stringify({ session_id: "s1", cwd: repo }), {
+    ...process.env,
+    TEST_HOOK_CORE_DATA_DIR: dataDir,
+  });
+
+  assert.equal(existsSync(join(dataDir, "outbox")), false);
+  assert.equal(activationStatus(dataDir), "needs-repair");
+});
+
+test("hook-core: corrupt activation state fails closed and status reports repair", async () => {
+  const dataDir = tmpDataDir();
+  const cfg: DeviceConfig = { token: "tok", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev1" };
+  saveConfig(dataDir, cfg);
+  savePolicy(dataDir, freshPolicy());
+  writeFileSync(join(dataDir, "activation.json"), "{broken");
+  const repo = initRepo("git@github.com:acme/widgets.git");
+
+  await runHook(fakeDialect({ isSessionStart: (event) => event === "Begin" }), "Begin", JSON.stringify({ session_id: "s1", cwd: repo }), {
+    ...process.env,
+    TEST_HOOK_CORE_DATA_DIR: dataDir,
+  });
+
+  assert.equal(activationStatus(dataDir), "needs-repair");
+  assert.equal(existsSync(join(dataDir, "outbox")), false);
+});
+
+test("hook-core: missing policy refreshes on session start before local routing", async () => {
+  const dataDir = tmpDataDir();
+  const cfg: DeviceConfig = { token: "tok", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev1" };
+  saveConfig(dataDir, cfg);
+  const repo = initRepo("git@github.com:acme/widgets.git");
+  const dialect = fakeDialect({ isSessionStart: (event) => event === "Begin", drainsOn: () => false });
+  let policyCalls = 0;
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (url: string | URL) => {
+    if (!String(url).endsWith("/policy")) throw new Error(`unexpected fetch: ${String(url)}`);
+    policyCalls += 1;
+    return Response.json({
+      etag: "fetched",
+      ttlSeconds: 900,
+      captureLevel: "metadata",
+      workspaces: [{ canonicalRepo: "github.com/acme/widgets", aliases: [], route: "project:p1" }],
+    });
+  }) as typeof fetch;
+  try {
+    await runHook(dialect, "Begin", JSON.stringify({ session_id: "s1", cwd: repo }), {
+      ...process.env,
+      TEST_HOOK_CORE_DATA_DIR: dataDir,
+    });
+  } finally {
+    globalThis.fetch = original;
+  }
+
+  assert.equal(policyCalls, 1);
+  assert.equal(readdirSync(join(dataDir, "outbox")).length, 2);
+});
+
+test("hook-core: unknown repositories may refresh policy but never enqueue or drain", async () => {
+  const dataDir = tmpDataDir();
+  const cfg: DeviceConfig = { token: "tok", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev1" };
+  saveConfig(dataDir, cfg);
+  const repo = initRepo("git@github.com:acme/private-work.git");
+  const dialect = fakeDialect({ isSessionStart: (event) => event === "Begin", drainsOn: () => true });
+  let policyCalls = 0;
+  let batchCalls = 0;
+  const original = globalThis.fetch;
+  globalThis.fetch = (async (url: string | URL) => {
+    const href = String(url);
+    if (href.endsWith("/policy")) {
+      policyCalls += 1;
+      return Response.json({
+        etag: "fetched",
+        ttlSeconds: 900,
+        captureLevel: "metadata",
+        workspaces: [{ canonicalRepo: "github.com/acme/widgets", aliases: [], route: "project:p1" }],
+      });
+    }
+    if (href.endsWith("/batches")) {
+      batchCalls += 1;
+      return Response.json({ results: [] });
+    }
+    throw new Error(`unexpected fetch: ${href}`);
+  }) as typeof fetch;
+  try {
+    await runHook(dialect, "Begin", JSON.stringify({ session_id: "s1", cwd: repo }), {
+      ...process.env,
+      TEST_HOOK_CORE_DATA_DIR: dataDir,
+    });
+  } finally {
+    globalThis.fetch = original;
+  }
+
+  assert.equal(policyCalls, 1);
+  assert.equal(batchCalls, 0);
+  assert.equal(existsSync(join(dataDir, "outbox")), false);
 });

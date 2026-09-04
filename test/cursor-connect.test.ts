@@ -7,6 +7,7 @@ import { authorizeCursor, connectCursor } from "../src/cursor-connect.js";
 import { cursorDialect } from "../src/cursor-hook.js";
 import { loadConfig, saveConfig, savePolicy } from "../src/config.js";
 import type { DeviceConfig, Policy } from "../src/config.js";
+import { activationStatus } from "../src/activation.js";
 
 function tmpParentDir(): string {
   return mkdtempSync(join(tmpdir(), "trinity-cursor-connect-"));
@@ -66,6 +67,7 @@ test("connect writes a 0700 data dir and a 0600 config.json a device did not hav
   const cfg = JSON.parse(readFileSync(cfgPath, "utf8")) as { token: string; ingestUrl: string; deviceId: string };
   assert.deepEqual(cfg, { token: "tok-1", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev-1" });
   assert.ok(existsSync(join(dataDir, "policy.json")));
+  assert.equal(activationStatus(dataDir), "paired-awaiting-new-session");
 });
 
 test("browser authorization opens Trinity and waits until approval before saving credentials", async () => {
