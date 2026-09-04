@@ -1,6 +1,6 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
-  "name": "trinity",
+  "name": "trinity-staging",
   "description": "Trinity's Claude Code plugins.",
   "owner": {
     "name": "Trinity"

@@ -1,5 +1,5 @@
 {
-  "name": "trinity-capture",
+  "name": "trinity-capture-staging",
   "description": "Captures Cursor coding sessions into Trinity for allowlisted repositories.",
   "version": "0.3.2",
   "author": {
