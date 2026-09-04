@@ -10,6 +10,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync } from "n
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { saveConfig, savePolicy } from "../src/config.js";
+import { activationStatus, markPairedAwaitingNewSession } from "../src/activation.js";
 
 // pnpm test always runs from the repository root.
 const hookBin = join(process.cwd(), "claude-code", "dist", "claude-hook.js");
@@ -188,6 +189,30 @@ test("committed binary omits the complete connect-command session from capture",
   // Then: no credential or setup noise enters the durable outbox.
   const outboxDir = join(dataDir, "outbox");
   assert.deepEqual(existsSync(outboxDir) ? readdirSync(outboxDir) : [], []);
+});
+
+test("committed binary arms Claude capture on clear but not resume", () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "trinity-pkg-data-"));
+  saveConfig(dataDir, { token: "tok", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev1" });
+  savePolicy(dataDir, {
+    etag: "e1",
+    fetchedAt: Date.now(),
+    ttlSeconds: 900,
+    captureLevel: "metadata",
+    workspaces: [{ canonicalRepo: "github.com/acme/widgets", aliases: [], route: "project:p1" }],
+  });
+  markPairedAwaitingNewSession(dataDir, "dev1");
+  const repo = initRepo("git@github.com:acme/widgets.git");
+  const stdin = JSON.parse(readFileSync(dialectStdinPath, "utf8")) as Record<string, unknown>;
+  stdin.cwd = repo;
+
+  runHookBinary(dataDir, "SessionStart", JSON.stringify({ ...stdin, source: "resume" }));
+  assert.equal(activationStatus(dataDir), "paired-awaiting-new-session");
+  assert.ok(!existsSync(join(dataDir, "outbox")));
+
+  runHookBinary(dataDir, "SessionStart", JSON.stringify({ ...stdin, source: "clear" }));
+  assert.equal(activationStatus(dataDir), "ready");
+  assert.equal(readdirSync(join(dataDir, "outbox")).length, 2);
 });
 
 test("the public trinity-capture entry preserves the trinity command namespace", () => {

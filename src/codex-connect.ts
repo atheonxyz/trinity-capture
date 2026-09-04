@@ -1,17 +1,17 @@
 import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { DEFAULT_BASE_URL, exchange, supportsNodeVersion } from "./connect.js";
-import { loadPolicy, saveConfig } from "./config.js";
+import { activationStatus, markPairedAwaitingNewSession } from "./activation.js";
+import { loadConfig, loadPolicy, saveConfig } from "./config.js";
 import type { DeviceConfig } from "./config.js";
 import { isPolicyFresh } from "./gate.js";
 import { isMainModule } from "./main-module.js";
 import { refreshPolicy } from "./send.js";
 
 const CAPTURE_DIR = "trinity-capture";
-const PENDING_CONFIG_FILE = "pending-device.json";
-const CONFIRMED_CONFIG_FILE = "connected-device.json";
+const DEFAULT_TARGET = "trinity-capture@trinity";
 const TRINITY_INGEST_ORIGINS = new Set([
   "https://api.usetrinity.ai",
   "https://api-staging.usetrinity.ai",
@@ -23,12 +23,28 @@ export function codexHome(env: NodeJS.ProcessEnv): string {
   return env.CODEX_HOME ?? join(homedir(), ".codex");
 }
 
-export function pendingConfigPath(home: string): string {
-  return join(home, CAPTURE_DIR, PENDING_CONFIG_FILE);
+export function targetKey(target: string): string {
+  const key = target.trim().replace("@", "-").replace(/[^A-Za-z0-9_.-]+/g, "-").replace(/^-+|-+$/g, "");
+  return key === "" ? targetKey(DEFAULT_TARGET) : key;
 }
 
-export function confirmedConfigPath(home: string): string {
-  return join(home, CAPTURE_DIR, CONFIRMED_CONFIG_FILE);
+export function targetKeyForPluginData(pluginDataDir: string): string {
+  return targetKey(basename(pluginDataDir));
+}
+
+function targetKeyForMain(targetArg: string | undefined, pluginDataDir: string | undefined): string {
+  const target = targetArg?.trim();
+  if (target) return targetKey(target);
+  if (pluginDataDir) return targetKeyForPluginData(pluginDataDir);
+  return targetKey(DEFAULT_TARGET);
+}
+
+export function pendingConfigPath(home: string, key = targetKey(DEFAULT_TARGET)): string {
+  return join(home, CAPTURE_DIR, `pending-device-v2-${key}.json`);
+}
+
+export function confirmedConfigPath(home: string, key = targetKey(DEFAULT_TARGET)): string {
+  return join(home, CAPTURE_DIR, `connected-device-${key}.json`);
 }
 
 function writePrivateJSON(home: string, filename: string, value: unknown): void {
@@ -45,9 +61,9 @@ function writePrivateJSON(home: string, filename: string, value: unknown): void 
 // NOT PLUGIN_DATA — it's a plugin-managed corner of CODEX_HOME the skill can
 // reach without that env var, secured the same way PLUGIN_DATA's own
 // credential file is.
-export function writePendingConfig(home: string, cfg: DeviceConfig): void {
-  rmSync(confirmedConfigPath(home), { force: true });
-  writePrivateJSON(home, PENDING_CONFIG_FILE, cfg);
+export function writePendingConfig(home: string, cfg: DeviceConfig, key = targetKey(DEFAULT_TARGET)): void {
+  rmSync(confirmedConfigPath(home, key), { force: true });
+  writePrivateJSON(home, `pending-device-v2-${key}.json`, cfg);
 }
 
 function parseTrustedDeviceConfig(value: unknown, baseUrl: string): DeviceConfig | null {
@@ -82,23 +98,38 @@ export async function promotePendingConfig(
   pluginDataDir: string,
   baseUrl = DEFAULT_BASE_URL,
 ): Promise<void> {
-  const pending = pendingConfigPath(home);
+  const key = targetKeyForPluginData(pluginDataDir);
+  const pending = pendingConfigPath(home, key);
   if (!existsSync(pending)) return;
   const cfg = parseTrustedDeviceConfig(JSON.parse(readFileSync(pending, "utf8")), baseUrl);
   if (!cfg) return;
+  const existing = loadConfig(pluginDataDir);
+  if (existing !== null && new URL(existing.ingestUrl).origin !== new URL(cfg.ingestUrl).origin) return;
 
+  markPairedAwaitingNewSession(pluginDataDir, cfg.deviceId);
   saveConfig(pluginDataDir, cfg);
   let policy = loadPolicy(pluginDataDir);
   if (!isPolicyFresh(policy, Date.now())) policy = await refreshPolicy(pluginDataDir, cfg);
   if (!isPolicyFresh(policy, Date.now())) return;
-  writePrivateJSON(home, CONFIRMED_CONFIG_FILE, { deviceId: cfg.deviceId });
+  writePrivateJSON(home, `connected-device-${key}.json`, { deviceId: cfg.deviceId });
   unlinkSync(pending);
 }
 
-export function connectionStatus(home: string): "pending" | "connected" | "unpaired" {
-  if (existsSync(pendingConfigPath(home))) return "pending";
-  if (existsSync(confirmedConfigPath(home))) return "connected";
+export function connectionStatus(home: string, key = targetKey(DEFAULT_TARGET)): "pending" | "connected" | "unpaired" {
+  if (existsSync(pendingConfigPath(home, key))) return "pending";
+  if (existsSync(confirmedConfigPath(home, key))) return "connected";
   return "unpaired";
+}
+
+function printDataDirStatus(dataDir: string): boolean {
+  const status = activationStatus(dataDir);
+  if (status === "unpaired") return false;
+  if (status === "needs-repair") {
+    console.log("Trinity connection needs repair. Generate a new pairing code and run /trinity-connect <pairing-code>.");
+    return true;
+  }
+  console.log(`Trinity status: ${status}.`);
+  return true;
 }
 
 async function main(): Promise<void> {
@@ -110,16 +141,18 @@ async function main(): Promise<void> {
 
   const home = codexHome(process.env);
   const arg = process.argv[2]?.trim() ?? "";
+  const pluginDataDir = process.env.TRINITY_CAPTURE_DATA ?? process.env.PLUGIN_DATA;
+  const key = targetKeyForMain(process.argv[3], pluginDataDir);
 
   if (arg === "--status") {
-    const status = connectionStatus(home);
+    if (pluginDataDir && printDataDirStatus(pluginDataDir)) return;
+    const status = connectionStatus(home, key);
     if (status === "pending") {
       console.log(
-        "Trinity pairing recorded but not yet confirmed. Run any Codex tool call, then " +
-          "run /trinity-connect --status again.",
+        "Trinity pairing recorded but not yet confirmed. Start a new Codex task or run any Codex tool call, then run /trinity-connect --status again.",
       );
     } else if (status === "connected") {
-      console.log("Trinity connected. This device now captures sessions for allowlisted repositories.");
+      console.log("Trinity status: paired-awaiting-new-session.");
     } else {
       console.log("Trinity is not paired. Run /trinity-connect <pairing-code> first.");
     }
@@ -135,8 +168,8 @@ async function main(): Promise<void> {
   const baseUrl = process.env.TRINITY_BASE_URL ?? DEFAULT_BASE_URL;
   try {
     const cfg = await exchange(baseUrl, arg);
-    writePendingConfig(home, cfg);
-    console.log("Trinity pairing recorded. Run /trinity-connect --status next to confirm it landed.");
+    writePendingConfig(home, cfg, key);
+    console.log("Trinity pairing recorded. Start a new Codex task in an enabled repository to begin capture.");
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err));
     process.exitCode = 1;

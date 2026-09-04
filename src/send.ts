@@ -1,5 +1,5 @@
 import type { DeviceConfig, Policy } from "./config.js";
-import { loadPolicy, savePolicy } from "./config.js";
+import { loadConfig, loadPolicy, savePolicy } from "./config.js";
 import type { CaptureEvent } from "./outbox.js";
 
 export const REQUEST_TIMEOUT_MS = 5_000;
@@ -47,6 +47,7 @@ export async function refreshPolicy(
   if (current) headers["If-None-Match"] = current.etag;
 
   const res = await fetch(policyUrl, { headers, signal: AbortSignal.timeout(timeoutMs) });
+  if (loadConfig(dataDir)?.deviceId !== cfg.deviceId) return null;
   if (res.status === 304 && current) {
     const refreshed: Policy = { ...current, fetchedAt: Date.now() };
     savePolicy(dataDir, refreshed);
@@ -55,6 +56,7 @@ export async function refreshPolicy(
   if (!res.ok) return current;
 
   const doc = (await res.json()) as Omit<Policy, "fetchedAt">;
+  if (loadConfig(dataDir)?.deviceId !== cfg.deviceId) return null;
   const policy: Policy = { ...doc, fetchedAt: Date.now() };
   savePolicy(dataDir, policy);
   return policy;

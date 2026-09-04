@@ -5,17 +5,44 @@
 // these fail. Mirrors test/packaging.test.ts's own acceptance for claude-code/dist.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import { once } from "node:events";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { saveConfig, savePolicy } from "../src/config.js";
-import { writePendingConfig, pendingConfigPath } from "../src/codex-connect.js";
+import { writePendingConfig, pendingConfigPath, targetKeyForPluginData } from "../src/codex-connect.js";
+import { activationStatus } from "../src/activation.js";
 
 // pnpm test always runs from the repository root.
 const hookBin = join(process.cwd(), "codex", "dist", "codex-hook.js");
 const connectBin = join(process.cwd(), "codex", "dist", "codex-connect.js");
 const fixturePath = join(process.cwd(), "test", "testdata", "codex_session.jsonl");
+
+async function withPolicyServer<T>(fn: (baseUrl: string) => Promise<T>): Promise<T> {
+  const server = createServer((_request, response) => {
+    response.setHeader("Content-Type", "application/json");
+    response.end(JSON.stringify({ etag: "e1", ttlSeconds: 900, captureLevel: "metadata", workspaces: [{ canonicalRepo: "github.com/acme/widgets", aliases: [], route: "project:p1" }] }));
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  try {
+    return await fn(`http://127.0.0.1:${address.port}`);
+  } finally {
+    server.close();
+    await once(server, "close");
+  }
+}
+
+async function runHookProcess(event: string, stdin: unknown, env: NodeJS.ProcessEnv): Promise<void> {
+  const child = spawn(process.execPath, [hookBin, event], { env, stdio: ["pipe", "ignore", "ignore"] });
+  child.stdin.end(JSON.stringify(stdin));
+  const [exitCode] = await once(child, "exit");
+  assert.equal(exitCode, 0);
+}
 
 function gitEnv(): NodeJS.ProcessEnv {
   return {
@@ -90,7 +117,7 @@ test("committed binary, authorized + allowlisted: appends the SessionStart pair 
   assert.deepEqual(kinds, ["SessionStart", "workspace.observed"]);
 });
 
-test("committed binary, PostToolUse: promotes a pending device config into PLUGIN_DATA and removes it", () => {
+test("committed binary, PostToolUse: promotes a pending device config but suppresses the setup session", async () => {
   const dataDir = mkdtempSync(join(tmpdir(), "trinity-codex-pkg-data-"));
   const codexHome = mkdtempSync(join(tmpdir(), "trinity-codex-pkg-home-"));
   const repo = initRepo("git@github.com:acme/widgets.git");
@@ -99,28 +126,43 @@ test("committed binary, PostToolUse: promotes a pending device config into PLUGI
   // separately, end to end through the real exchange(), in
   // codex-connect.test.ts) so this test isolates what's packaging-specific:
   // the COMMITTED dist codex-hook.js's own PostToolUse promotion step.
-  writePendingConfig(codexHome, { token: "tok", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev1" });
-  const pending = pendingConfigPath(codexHome);
-  assert.ok(existsSync(pending));
+  const key = targetKeyForPluginData(dataDir);
+  const pending = pendingConfigPath(codexHome, key);
 
   const stdin = loadFixtureLine("PostToolUse");
   stdin.cwd = repo;
-  savePolicy(dataDir, {
-    etag: "e1",
-    fetchedAt: Date.now(),
-    ttlSeconds: 900,
-    captureLevel: "metadata",
-    workspaces: [{ canonicalRepo: "github.com/acme/widgets", aliases: [], route: "project:p1" }],
-  });
-  execFileSync("node", [hookBin, "PostToolUse"], {
-    input: JSON.stringify(stdin),
-    env: { ...process.env, PLUGIN_DATA: dataDir, CODEX_HOME: codexHome, TRINITY_BASE_URL: "http://127.0.0.1:1" },
+  await withPolicyServer(async (baseUrl) => {
+    writePendingConfig(codexHome, { token: "tok", ingestUrl: `${baseUrl}/api/v1/ingest/batches`, deviceId: "dev1" }, key);
+    assert.ok(existsSync(pending));
+    await runHookProcess("PostToolUse", stdin, {
+      ...process.env, PLUGIN_DATA: dataDir, CODEX_HOME: codexHome, TRINITY_BASE_URL: baseUrl,
+    });
   });
 
   assert.ok(!existsSync(pending), "the committed PostToolUse hook must promote and remove the pending file");
   const configPath = join(dataDir, "config.json");
   assert.ok(existsSync(configPath), "promotion must land PLUGIN_DATA/config.json");
   assert.equal(statSync(configPath).mode & 0o777, 0o600);
+  assert.equal(activationStatus(dataDir), "paired-awaiting-new-session");
+  assert.ok(!existsSync(join(dataDir, "outbox")), "the setup tool event must not be captured after promotion");
+});
+
+test("committed binary, pending device can promote and capture on the first new SessionStart", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "trinity-codex-pkg-data-"));
+  const codexHome = mkdtempSync(join(tmpdir(), "trinity-codex-pkg-home-"));
+  const repo = initRepo("git@github.com:acme/widgets.git");
+  const stdin = loadFixtureLine("SessionStart");
+  stdin.cwd = repo;
+  await withPolicyServer(async (baseUrl) => {
+    writePendingConfig(codexHome, { token: "tok", ingestUrl: `${baseUrl}/api/v1/ingest/batches`, deviceId: "dev1" }, targetKeyForPluginData(dataDir));
+    await runHookProcess("SessionStart", stdin, {
+      ...process.env, PLUGIN_DATA: dataDir, CODEX_HOME: codexHome, TRINITY_BASE_URL: baseUrl,
+    });
+  });
+
+  assert.ok(!existsSync(pendingConfigPath(codexHome, targetKeyForPluginData(dataDir))));
+  assert.equal(activationStatus(dataDir), "ready");
+  assert.equal(readdirSync(join(dataDir, "outbox")).length, 2);
 });
 
 test("the repo-root marketplace manifest names trinity-capture at the packaged codex plugin dir", () => {
@@ -233,6 +275,7 @@ test("uninstall: hooks.json and the connect skill reference nothing outside the 
   const skillPath = join(process.cwd(), "codex", "skills", "trinity-connect", "SKILL.md");
   const skillRaw = readFileSync(skillPath, "utf8");
   assert.match(skillRaw, /dist\/codex-connect\.js/);
-  assert.doesNotMatch(skillRaw, /codex plugin (?:list|marketplace|add)/);
+  assert.match(skillRaw, /codex plugin list --json/);
+  assert.doesNotMatch(skillRaw, /codex-connect\.js" <pairing-code> trinity-capture@trinity/);
   assert.doesNotMatch(skillRaw, /\/Users\/|\/home\//, "the connect skill must not embed an absolute local path");
 });

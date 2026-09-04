@@ -1,4 +1,4 @@
-import { loadPolicy, savePolicy } from "./config.js";
+import { loadConfig, loadPolicy, savePolicy } from "./config.js";
 export const REQUEST_TIMEOUT_MS = 5_000;
 export class BatchRequestError extends Error {
     status;
@@ -30,6 +30,8 @@ export async function refreshPolicy(dataDir, cfg, timeoutMs = REQUEST_TIMEOUT_MS
     if (current)
         headers["If-None-Match"] = current.etag;
     const res = await fetch(policyUrl, { headers, signal: AbortSignal.timeout(timeoutMs) });
+    if (loadConfig(dataDir)?.deviceId !== cfg.deviceId)
+        return null;
     if (res.status === 304 && current) {
         const refreshed = { ...current, fetchedAt: Date.now() };
         savePolicy(dataDir, refreshed);
@@ -38,6 +40,8 @@ export async function refreshPolicy(dataDir, cfg, timeoutMs = REQUEST_TIMEOUT_MS
     if (!res.ok)
         return current;
     const doc = (await res.json());
+    if (loadConfig(dataDir)?.deviceId !== cfg.deviceId)
+        return null;
     const policy = { ...doc, fetchedAt: Date.now() };
     savePolicy(dataDir, policy);
     return policy;

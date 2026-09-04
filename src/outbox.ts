@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DeviceConfig } from "./config.js";
+import { markCaptured } from "./activation.js";
 import type { ItemResult } from "./send.js";
 import { BatchRequestError, refreshPolicy, sendBatch } from "./send.js";
 
@@ -36,8 +37,10 @@ const MAX_DROP_RECORDS = 100;
 interface OutboxEntry {
   file: string;
   bytes: number;
-  event: CaptureEvent;
+  event: StoredCaptureEvent;
 }
+
+type StoredCaptureEvent = CaptureEvent & { readonly _deviceId?: string };
 
 function outboxDir(dataDir: string): string {
   const dir = join(dataDir, "outbox");
@@ -107,20 +110,22 @@ function enforceOutboxLimit(dataDir: string, dir: string): void {
   }
 }
 
-export function appendEvent(dataDir: string, ev: CaptureEvent): void {
-  const line = JSON.stringify(ev) + "\n";
+export function appendEvent(dataDir: string, ev: CaptureEvent, deviceId?: string): boolean {
+  const stored: StoredCaptureEvent = deviceId === undefined ? ev : { ...ev, _deviceId: deviceId };
+  const line = JSON.stringify(stored) + "\n";
   if (Buffer.byteLength(line, "utf8") > MAX_EVENT_BYTES) {
     recordDrop(dataDir, { reason: "oversized", captureEventId: ev.captureEventId, kind: ev.kind });
-    return;
+    return false;
   }
   const dir = outboxDir(dataDir);
   try {
     writeFileSync(fileFor(dir, ev), line, { flag: "wx" });
   } catch (err) {
-    if (isAlreadyQueued(err)) return;
+    if (isAlreadyQueued(err)) return true;
     throw err;
   }
   enforceOutboxLimit(dataDir, dir);
+  return true;
 }
 
 export interface DrainOptions {
@@ -148,9 +153,9 @@ export async function drain(
       if (!(err instanceof Error)) throw err;
       continue;
     }
-    let event: CaptureEvent;
+    let event: StoredCaptureEvent;
     try {
-      event = JSON.parse(raw) as CaptureEvent;
+      event = JSON.parse(raw) as StoredCaptureEvent;
     } catch (err) {
       if (!(err instanceof SyntaxError)) throw err;
       rmSync(path, { force: true });
@@ -161,7 +166,9 @@ export async function drain(
       recordDrop(dataDir, { reason: "expired", captureEventId: event.captureEventId, kind: event.kind });
       continue;
     }
-    entries.push({ file, bytes: Buffer.byteLength(raw, "utf8"), event });
+    if (event._deviceId === undefined || event._deviceId === cfg.deviceId) {
+      entries.push({ file, bytes: Buffer.byteLength(raw, "utf8"), event });
+    }
   }
 
   let offset = 0;
@@ -204,7 +211,10 @@ async function deliverBatch(
   try {
     const remaining = options.inline ? options.deadline - Date.now() : undefined;
     if (remaining !== undefined && remaining <= 0) return "abort";
-    results = await sendBatch(cfg, entries.map((e) => e.event), remaining);
+    results = await sendBatch(cfg, entries.map(({ event }) => {
+      const { _deviceId: _, ...wireEvent } = event;
+      return wireEvent;
+    }), remaining);
   } catch (err) {
     if (err instanceof BatchRequestError && err.status === 413) {
       if (entries.length === 1) {
@@ -229,6 +239,7 @@ async function deliverBatch(
     if (result === undefined) continue;
     if (result.outcome === "stored" || result.outcome === "duplicate" || result.outcome === "rejected_permanent") {
       rmSync(join(dir, file), { force: true });
+      if (result.outcome === "stored" || result.outcome === "duplicate") markCaptured(dataDir, cfg.deviceId);
     } else if (result.outcome === "retry_later" && result.code === "policy_stale") {
       policyStale = true;
     }

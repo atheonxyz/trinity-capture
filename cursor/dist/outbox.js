@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { markCaptured } from "./activation.js";
 import { BatchRequestError, refreshPolicy, sendBatch } from "./send.js";
 const MAX_BATCHES = 5;
 export const INLINE_DRAIN_BUDGET_MS = 2_000;
@@ -78,11 +79,12 @@ function enforceOutboxLimit(dataDir, dir) {
         }
     }
 }
-export function appendEvent(dataDir, ev) {
-    const line = JSON.stringify(ev) + "\n";
+export function appendEvent(dataDir, ev, deviceId) {
+    const stored = deviceId === undefined ? ev : { ...ev, _deviceId: deviceId };
+    const line = JSON.stringify(stored) + "\n";
     if (Buffer.byteLength(line, "utf8") > MAX_EVENT_BYTES) {
         recordDrop(dataDir, { reason: "oversized", captureEventId: ev.captureEventId, kind: ev.kind });
-        return;
+        return false;
     }
     const dir = outboxDir(dataDir);
     try {
@@ -90,10 +92,11 @@ export function appendEvent(dataDir, ev) {
     }
     catch (err) {
         if (isAlreadyQueued(err))
-            return;
+            return true;
         throw err;
     }
     enforceOutboxLimit(dataDir, dir);
+    return true;
 }
 export async function drain(dataDir, cfg, options = { inline: false, deadline: 0 }) {
     if (options.inline && Date.now() >= options.deadline)
@@ -128,7 +131,9 @@ export async function drain(dataDir, cfg, options = { inline: false, deadline: 0
             recordDrop(dataDir, { reason: "expired", captureEventId: event.captureEventId, kind: event.kind });
             continue;
         }
-        entries.push({ file, bytes: Buffer.byteLength(raw, "utf8"), event });
+        if (event._deviceId === undefined || event._deviceId === cfg.deviceId) {
+            entries.push({ file, bytes: Buffer.byteLength(raw, "utf8"), event });
+        }
     }
     let offset = 0;
     let policyStale = false;
@@ -166,7 +171,10 @@ async function deliverBatch(dir, dataDir, cfg, entries, options) {
         const remaining = options.inline ? options.deadline - Date.now() : undefined;
         if (remaining !== undefined && remaining <= 0)
             return "abort";
-        results = await sendBatch(cfg, entries.map((e) => e.event), remaining);
+        results = await sendBatch(cfg, entries.map(({ event }) => {
+            const { _deviceId: _, ...wireEvent } = event;
+            return wireEvent;
+        }), remaining);
     }
     catch (err) {
         if (err instanceof BatchRequestError && err.status === 413) {
@@ -194,6 +202,8 @@ async function deliverBatch(dir, dataDir, cfg, entries, options) {
             continue;
         if (result.outcome === "stored" || result.outcome === "duplicate" || result.outcome === "rejected_permanent") {
             rmSync(join(dir, file), { force: true });
+            if (result.outcome === "stored" || result.outcome === "duplicate")
+                markCaptured(dataDir, cfg.deviceId);
         }
         else if (result.outcome === "retry_later" && result.code === "policy_stale") {
             policyStale = true;

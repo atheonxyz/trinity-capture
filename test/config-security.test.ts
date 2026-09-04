@@ -3,7 +3,38 @@ import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadConfig, saveConfig } from "../src/config.js";
+import { loadConfig, loadPolicy, saveConfig, savePolicy } from "../src/config.js";
+
+test("replacing a device invalidates its cached capture policy", () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "trinity-config-data-"));
+  const config = { token: "old-token", ingestUrl: "https://ingest.example/api/v1/ingest/batches", deviceId: "old-device" };
+  saveConfig(dataDir, config);
+  savePolicy(dataDir, { etag: "old-policy", fetchedAt: Date.now(), ttlSeconds: 900, captureLevel: "metadata", workspaces: [] });
+
+  saveConfig(dataDir, { ...config, token: "new-token", deviceId: "new-device" });
+
+  assert.equal(loadPolicy(dataDir), null);
+});
+
+test("pairing without a credential invalidates an orphaned capture policy", () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "trinity-config-data-"));
+  savePolicy(dataDir, { etag: "orphan", fetchedAt: Date.now(), ttlSeconds: 900, captureLevel: "metadata", workspaces: [] });
+
+  saveConfig(dataDir, { token: "token", ingestUrl: "https://ingest.example/api/v1/ingest/batches", deviceId: "device" });
+
+  assert.equal(loadPolicy(dataDir), null);
+});
+
+test("saving the same device preserves its cached capture policy", () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "trinity-config-data-"));
+  const config = { token: "token", ingestUrl: "https://ingest.example/api/v1/ingest/batches", deviceId: "device" };
+  saveConfig(dataDir, config);
+  savePolicy(dataDir, { etag: "policy", fetchedAt: Date.now(), ttlSeconds: 900, captureLevel: "metadata", workspaces: [] });
+
+  saveConfig(dataDir, config);
+
+  assert.equal(loadPolicy(dataDir)?.etag, "policy");
+});
 
 test("the device credential file is private to the current user", () => {
   const dataDir = mkdtempSync(join(tmpdir(), "trinity-config-data-"));

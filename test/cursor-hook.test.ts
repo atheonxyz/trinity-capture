@@ -2,10 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cursorDialect, runCursorHook } from "../src/cursor-hook.js";
+import { cursorDataDir, cursorDialect, runCursorHook } from "../src/cursor-hook.js";
 import { saveConfig, savePolicy } from "../src/config.js";
 import type { DeviceConfig, Policy } from "../src/config.js";
 
@@ -88,6 +88,13 @@ function readStatusDrops(dataDir: string): { reason: string; kind: string }[] {
     return [];
   }
 }
+
+test("a staging Cursor package keeps its connection separate", () => {
+  const root = mkdtempSync(join(tmpdir(), "trinity-cursor-plugin-"));
+  mkdirSync(join(root, ".cursor-plugin"));
+  writeFileSync(join(root, ".cursor-plugin", "plugin.json"), JSON.stringify({ name: "trinity-capture-staging" }));
+  assert.match(cursorDataDir({ ...process.env, CURSOR_PLUGIN_ROOT: root }) ?? "", /cursor-staging$/);
+});
 
 test("the fixture's on-disk content matches the recorded cross-repo SHA-256", () => {
   const raw = readFileSync(join(process.cwd(), "test", "testdata", "cursor_session.jsonl"));

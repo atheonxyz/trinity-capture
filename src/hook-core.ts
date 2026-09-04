@@ -6,7 +6,9 @@ import { randomUUID } from "node:crypto";
 import { linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig, loadPolicy } from "./config.js";
-import { isPolicyFresh, matchRoute, routeFor } from "./gate.js";
+import { allowSessionCapture } from "./activation.js";
+import { isPolicyFresh, resolveRoute } from "./gate.js";
+import { resolveGitHubRepository } from "./github-repo.js";
 import { appendEvent, drain, INLINE_DRAIN_BUDGET_MS } from "./outbox.js";
 import type { CaptureEvent } from "./outbox.js";
 import { gitRemoteOf, repoRelativeCwd, workspaceObserved } from "./observe.js";
@@ -25,6 +27,7 @@ export interface Dialect {
   // synthesis — both are "new session" moments, not necessarily named
   // "SessionStart" (dialects use their own event vocabulary).
   isSessionStart(event: string): boolean;
+  isFreshSessionStart?(event: string, payload: Record<string, unknown>): boolean;
   // Gates WHETHER this event drains at all (a dialect whose hooks run
   // synchronously may only want to drain on its own lifecycle boundaries).
   // drainInline separately governs HOW a drain that does happen behaves
@@ -172,17 +175,21 @@ export async function runHook(dialect: Dialect, event: string, stdin: string, en
   const cfg = loadConfig(dataDir);
   if (!cfg) return; // never authorized — fail closed, zero network requests
 
-  // Self-healing happens before the gate, not after: routeFor already
-  // fails closed on a stale policy, so a refresh attempted only once
-  // send:false has been decided can never run. Scoped to the dialect's own
-  // session-start moment, not a literal event name — hook-core carries no
-  // vendor vocabulary of its own.
+  const sessionId = dialect.sessionId(event, payload) ?? "";
+  if (!allowSessionCapture({
+    dataDir,
+    tool: dialect.tool,
+    sessionId,
+    deviceId: cfg.deviceId,
+    isSessionStart: dialect.isSessionStart(event),
+    isFreshSessionStart: dialect.isFreshSessionStart?.(event, payload) ?? dialect.isSessionStart(event),
+  })) return;
+
   const cwd = dialect.cwd(event, payload) ?? process.cwd();
   const gitRemote = gitRemoteOf(cwd);
   let policy = loadPolicy(dataDir);
-  if (!matchRoute(policy, gitRemote).send) return;
+  const remaining = dialect.drainInline ? hookEntryDeadline - Date.now() : undefined;
   if (dialect.isSessionStart(event) && !isPolicyFresh(policy, Date.now())) {
-    const remaining = dialect.drainInline ? hookEntryDeadline - Date.now() : undefined;
     if (remaining === undefined || remaining > 0) {
       try {
         policy = await refreshPolicy(dataDir, cfg, remaining);
@@ -192,10 +199,13 @@ export async function runHook(dialect: Dialect, event: string, stdin: string, en
     }
   }
 
-  const route = routeFor(policy, Date.now(), gitRemote);
+  const route = await resolveRoute(policy, gitRemote, (fullName) => {
+    const lookupBudget = dialect.drainInline ? hookEntryDeadline - Date.now() : 1_500;
+    return lookupBudget > 0 ? resolveGitHubRepository(dataDir, fullName, lookupBudget) : Promise.resolve(null);
+  });
   if (!route.send) return; // not allowlisted, or policy missing/still stale — no event, no drain
+  if (loadConfig(dataDir)?.deviceId !== cfg.deviceId) return;
 
-  const sessionId = dialect.sessionId(event, payload) ?? "";
   const repoCwd = repoRelativeCwd(cwd);
   const turnKey = sessionId === "" || dialect.isSessionStart(event)
     ? undefined
@@ -212,12 +222,12 @@ export async function runHook(dialect: Dialect, event: string, stdin: string, en
     ...(turnKey === undefined ? {} : { turnKey }),
     payload: filterPayload(payload, dialect.allow(event)),
   };
-  appendEvent(dataDir, captureEvent);
+  appendEvent(dataDir, captureEvent, cfg.deviceId);
 
   if (dialect.isSessionStart(event)) {
     const observed = workspaceObserved(cwd);
     if (observed) {
-      appendEvent(dataDir, { ...observed, tool: dialect.tool, externalSessionId: sessionId, repo: route.canonicalRepo, repoCwd });
+      appendEvent(dataDir, { ...observed, tool: dialect.tool, externalSessionId: sessionId, repo: route.canonicalRepo, repoCwd }, cfg.deviceId);
     }
   }
 
