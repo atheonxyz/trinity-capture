@@ -12,8 +12,13 @@ Connect this Codex installation with the short-lived pairing code the user provi
    exchange the code and writes the device credential under `~/.codex`; never print
    the pairing code.
 3. Run `node "<pluginRoot>/dist/codex-connect.js" <pairing-code> trinity-capture@trinity-staging`.
-4. Run `node "<pluginRoot>/dist/codex-connect.js" --status trinity-capture@trinity-staging` separately. If it is
-   pending, wait one second and retry up to five times while this plugin's
-   PostToolUse hook promotes the credential into its own data directory.
-5. Report the final status output as-is. When connected, tell the user to start a
-   new Codex task so capture begins at SessionStart.
+4. If the command exits successfully, setup is complete. On a fresh install the
+   credential may be pending until the next task's SessionStart hook promotes it;
+   that is expected and should not be polled in this setup task.
+5. Reply with exactly these two lines and no extra diagnostics, version numbers,
+   paths, hook details, credential details, pairing-code guidance, or reload wording:
+
+```text
+Trinity is paired.
+Start a new Codex task in the repository where you want to work. Capture starts automatically.
+```
