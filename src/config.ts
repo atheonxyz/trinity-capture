@@ -64,8 +64,6 @@ export function saveConfig(dir: string, cfg: DeviceConfig): void {
   if (existing === null || !sameConfig(existing, cfg)) {
     rmSync(join(dir, "policy.json"), { force: true });
     rmSync(join(dir, "github-repositories.json"), { force: true });
-  }
-  if (existing === null || existing.deviceId !== cfg.deviceId) {
     const sources = ["outbox", "active-sessions", "turnkeys"].filter((name) => existsSync(join(dir, name)));
     if (sources.length > 0) {
       const retired = join(dir, "retired", randomUUID());

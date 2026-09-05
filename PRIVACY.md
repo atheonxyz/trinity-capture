@@ -31,6 +31,8 @@ The plugin stores a revocable device credential, a short-lived repository allowl
 
 Queued events expire after seven days. The outbox is capped at 2,000 events or 16 MiB and records local drops in `status.json`.
 
+Re-pairing moves the previous connection's queued events and session tracking into a local `retired/` directory. They are kept on disk but are no longer uploaded. Capture resumes in a new session; the machine's history already stored in Trinity remains available.
+
 ## Control and deletion
 
 You can revoke a device from Trinity at any time. Revocation immediately prevents future policy and ingest requests. Removing the plugin stops capture. Local plugin data can be removed separately from the operating system's application-data directory documented in [README.md](README.md#credential-storage).

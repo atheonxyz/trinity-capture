@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { claimTurnKey, runHook, turnKeyDir } from "../src/hook-core.js";
@@ -306,6 +306,46 @@ test("hook-core: a stale credential cannot cross a new pairing epoch", async () 
 
   assert.equal(existsSync(join(dataDir, "outbox")), false);
   assert.equal(activationStatus(dataDir), "needs-repair");
+});
+
+test("hook-core: a same-device token rotation blocks stale in-flight hook appends", async () => {
+  const dataDir = tmpDataDir();
+  const oldCfg: DeviceConfig = { token: "old", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev1" };
+  const newCfg: DeviceConfig = { ...oldCfg, token: "new" };
+  saveConfig(dataDir, oldCfg);
+  savePolicy(dataDir, freshPolicy());
+  mkdirSync(join(dataDir, "active-sessions"), { recursive: true, mode: 0o700 });
+  writeFileSync(join(dataDir, "active-sessions", "claude_code-old-session"), oldCfg.deviceId, { mode: 0o600 });
+  const repo = initRepo("git@github.com:acme/widgets.git");
+  const dialect = fakeDialect({
+    isSessionStart: (event) => event === "Begin",
+    isFreshSessionStart: (event, payload) => event === "Begin" && payload.source === "fresh",
+    drainsOn: () => false,
+  });
+
+  const run = runHook(
+    dialect,
+    "ToolCall",
+    JSON.stringify({ session_id: "old-session", cwd: repo, marker: "stale-before-repair" }),
+    { ...process.env, TEST_HOOK_CORE_DATA_DIR: dataDir },
+  );
+  saveConfig(dataDir, newCfg);
+  markPairedAwaitingNewSession(dataDir, newCfg.deviceId);
+  savePolicy(dataDir, freshPolicy());
+  await run;
+
+  assert.equal(existsSync(join(dataDir, "outbox")), false, "old-token work must not queue after same-device reconnect");
+  assert.equal(activationStatus(dataDir), "paired-awaiting-new-session");
+
+  await runHook(
+    dialect,
+    "Begin",
+    JSON.stringify({ session_id: "fresh-session", cwd: repo, source: "fresh" }),
+    { ...process.env, TEST_HOOK_CORE_DATA_DIR: dataDir },
+  );
+
+  assert.equal(activationStatus(dataDir), "ready");
+  assert.equal(readdirSync(join(dataDir, "outbox")).length, 2);
 });
 
 test("hook-core: corrupt activation state fails closed and status reports repair", async () => {
