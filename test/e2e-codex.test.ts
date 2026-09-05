@@ -23,8 +23,8 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 
 import { exchange } from "../src/connect.js";
-import { saveConfig } from "../src/config.js";
 import type { DeviceConfig } from "../src/config.js";
+import { promotePendingConfig, targetKeyForPluginData, writePendingConfig } from "../src/codex-connect.js";
 import { refreshPolicy } from "../src/send.js";
 import { drain } from "../src/outbox.js";
 import { runHook } from "../src/hook-core.js";
@@ -111,11 +111,9 @@ test("pairs a codex device, replays the real captured hook stream through the re
   assert.ok(cfg.token && cfg.deviceId && cfg.ingestUrl);
 
   const dataDir = mkdtempSync(join(tmpdir(), "trinity-e2e-codex-"));
-  // The connect skill's pending-file→PLUGIN_DATA promotion dance is proven
-  // separately (codex-connect.test.ts, codex-packaging.test.ts); seeding
-  // PLUGIN_DATA directly here keeps this smoke's own scope to capture
-  // correctness, exactly like test/e2e.test.ts does for claude_code.
-  saveConfig(dataDir, cfg);
+  const home = mkdtempSync(join(tmpdir(), "trinity-e2e-codex-home-"));
+  writePendingConfig(home, cfg, targetKeyForPluginData(dataDir));
+  await promotePendingConfig(home, dataDir, baseUrl);
 
   // 3. The plugin's own policy fetch — asserts the seeded repo is allowlisted.
   const policy = await refreshPolicy(dataDir, cfg);
