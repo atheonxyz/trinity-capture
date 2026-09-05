@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { platform } from "node:os";
+import { hostname, platform } from "node:os";
 import { REQUEST_TIMEOUT_MS } from "./send.js";
 function field(body, name) {
     return typeof body === "object" && body !== null ? Reflect.get(body, name) : undefined;
@@ -48,11 +48,11 @@ export async function startDeviceAuthorization(baseURL, deviceName) {
         intervalSeconds: requiredPositiveNumber(body, "intervalSeconds"),
     };
 }
-export async function exchangeDeviceAuthorization(baseURL, deviceCode) {
+export async function exchangeDeviceAuthorization(baseURL, deviceCode, previousDeviceId) {
     const response = await fetch(`${baseURL}/api/v1/devices/authorize/exchange`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ deviceCode }),
+        body: JSON.stringify({ deviceCode, hostname: hostname(), ...(previousDeviceId ? { deviceId: previousDeviceId } : {}) }),
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     if (response.status === 202)

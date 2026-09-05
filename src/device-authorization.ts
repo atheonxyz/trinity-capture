@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { platform } from "node:os";
+import { hostname, platform } from "node:os";
 
 import type { DeviceConfig } from "./config.js";
 import { REQUEST_TIMEOUT_MS } from "./send.js";
@@ -69,11 +69,12 @@ export async function startDeviceAuthorization(baseURL: string, deviceName: stri
 export async function exchangeDeviceAuthorization(
   baseURL: string,
   deviceCode: string,
+  previousDeviceId: string | null,
 ): Promise<DeviceAuthorizationExchange> {
   const response = await fetch(`${baseURL}/api/v1/devices/authorize/exchange`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ deviceCode }),
+    body: JSON.stringify({ deviceCode, hostname: hostname(), ...(previousDeviceId ? { deviceId: previousDeviceId } : {}) }),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (response.status === 202) return { status: "pending" };

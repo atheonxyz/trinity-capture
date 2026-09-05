@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { exchange } from "../src/connect.js";
 import { refreshPolicy, REQUEST_TIMEOUT_MS, sendBatch } from "../src/send.js";
@@ -16,6 +16,21 @@ test("an in-flight old-device policy cannot overwrite a replacement pairing", as
   t.mock.method(globalThis, "fetch", async () => {
     saveConfig(dataDir, { ...cfg, token: "new", deviceId: "new" });
     return Response.json({ etag: "old", ttlSeconds: 900, captureLevel: "metadata", workspaces: [] });
+  });
+
+  const policy = await refreshPolicy(dataDir, cfg);
+
+  assert.equal(policy, null);
+  assert.equal(loadPolicy(dataDir), null);
+});
+
+test("an in-flight old-token policy cannot overwrite a same-device reconnect", async (t) => {
+  const dataDir = mkdtempSync(join(tmpdir(), "trinity-network-data-"));
+  const cfg = { token: "old-token", ingestUrl: "https://ingest.example/api/v1/ingest/batches", deviceId: "device" };
+  saveConfig(dataDir, cfg);
+  t.mock.method(globalThis, "fetch", async () => {
+    saveConfig(dataDir, { ...cfg, token: "new-token" });
+    return Response.json({ etag: "old-token-policy", ttlSeconds: 900, captureLevel: "metadata", workspaces: [] });
   });
 
   const policy = await refreshPolicy(dataDir, cfg);
@@ -52,10 +67,44 @@ test("plugin HTTP requests carry a bounded abort signal", async () => {
     return Response.json({ results: [{ captureEventId: event.captureEventId, outcome: "stored" }] });
   }) as typeof fetch;
   try {
-    await exchange("https://api.example", "ABCD1234EFGH");
+    await exchange("https://api.example", "ABCD1234EFGH", null);
     await refreshPolicy(dataDir, cfg);
     await sendBatch(cfg, [event]);
   } finally {
     globalThis.fetch = original;
   }
+});
+
+test("exchange reports the hostname and the saved device id", async () => {
+  const bodies: unknown[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+    bodies.push(JSON.parse(String(init?.body)));
+    return Response.json({ token: "tok", deviceId: "dev1", ingestUrl: "https://ingest.example/api/v1/ingest/batches" });
+  }) as typeof fetch;
+  try {
+    await exchange("https://api.example", "ABCD1234EFGH", "dev0");
+    await exchange("https://api.example", "ABCD1234EFGH", null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.deepEqual(bodies, [
+    { code: "ABCD1234EFGH", hostname: hostname(), deviceId: "dev0" },
+    { code: "ABCD1234EFGH", hostname: hostname() },
+  ]);
+});
+
+test("a batch carries the machine's hostname beside its items", async () => {
+  let body: unknown;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+    body = JSON.parse(String(init?.body));
+    return Response.json({ results: [] });
+  }) as typeof fetch;
+  try {
+    await sendBatch({ token: "tok", ingestUrl: "https://ingest.example/api/v1/ingest/batches", deviceId: "dev1" }, []);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.deepEqual(body, { items: [], hostname: hostname() });
 });

@@ -1,4 +1,5 @@
-import { loadConfig, loadPolicy, savePolicy } from "./config.js";
+import { hostname } from "node:os";
+import { isCurrentConfig, loadPolicy, savePolicy } from "./config.js";
 export const REQUEST_TIMEOUT_MS = 5_000;
 export class BatchRequestError extends Error {
     status;
@@ -15,7 +16,7 @@ export async function sendBatch(cfg, events, timeoutMs = REQUEST_TIMEOUT_MS) {
             "Content-Type": "application/json",
             "X-Trinity-Wire-Version": "1",
         },
-        body: JSON.stringify({ items: events }),
+        body: JSON.stringify({ items: events, hostname: hostname() }),
         signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok)
@@ -30,7 +31,7 @@ export async function refreshPolicy(dataDir, cfg, timeoutMs = REQUEST_TIMEOUT_MS
     if (current)
         headers["If-None-Match"] = current.etag;
     const res = await fetch(policyUrl, { headers, signal: AbortSignal.timeout(timeoutMs) });
-    if (loadConfig(dataDir)?.deviceId !== cfg.deviceId)
+    if (!isCurrentConfig(dataDir, cfg))
         return null;
     if (res.status === 304 && current) {
         const refreshed = { ...current, fetchedAt: Date.now() };
@@ -40,7 +41,7 @@ export async function refreshPolicy(dataDir, cfg, timeoutMs = REQUEST_TIMEOUT_MS
     if (!res.ok)
         return current;
     const doc = (await res.json());
-    if (loadConfig(dataDir)?.deviceId !== cfg.deviceId)
+    if (!isCurrentConfig(dataDir, cfg))
         return null;
     const policy = { ...doc, fetchedAt: Date.now() };
     savePolicy(dataDir, policy);

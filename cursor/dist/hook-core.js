@@ -5,7 +5,7 @@
 import { randomUUID } from "node:crypto";
 import { linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { loadConfig, loadPolicy } from "./config.js";
+import { isCurrentConfig, loadConfig, loadPolicy } from "./config.js";
 import { allowSessionCapture } from "./activation.js";
 import { isPolicyFresh, resolveRoute } from "./gate.js";
 import { resolveGitHubRepository } from "./github-repo.js";
@@ -172,7 +172,7 @@ export async function runHook(dialect, event, stdin, env) {
     });
     if (!route.send)
         return; // not allowlisted, or policy missing/still stale — no event, no drain
-    if (loadConfig(dataDir)?.deviceId !== cfg.deviceId)
+    if (!isCurrentConfig(dataDir, cfg))
         return;
     const repoCwd = repoRelativeCwd(cwd);
     const turnKey = sessionId === "" || dialect.isSessionStart(event)

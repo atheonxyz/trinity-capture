@@ -4,6 +4,8 @@ Trinity Capture is designed to keep unrelated work local.
 
 ## Data processed
 
+During pairing and capture uploads, the plugin sends your machine's hostname and its saved device identifier when available. Trinity uses them to name and reconnect the machine. The hostname appears alongside your sessions and is visible to teammates who can view your IDE activity.
+
 For repositories enabled in Trinity, the plugin may send:
 
 - User prompts and assistant responses.
@@ -28,6 +30,8 @@ The plugin does not send:
 The plugin stores a revocable device credential, a short-lived repository allowlist, turn correlation keys, delivery status, and a bounded retry outbox in a per-user application-data directory. On POSIX systems, credential directories use mode `0700` and files use mode `0600`.
 
 Queued events expire after seven days. The outbox is capped at 2,000 events or 16 MiB and records local drops in `status.json`.
+
+Re-pairing moves the previous connection's queued events and session tracking into a local `retired/` directory. They are kept on disk but are no longer uploaded. Capture resumes in a new session; the machine's history already stored in Trinity remains available.
 
 ## Control and deletion
 

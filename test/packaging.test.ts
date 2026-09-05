@@ -5,15 +5,18 @@
 // these fail.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { hostname, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { saveConfig, savePolicy } from "../src/config.js";
 import { activationStatus, markPairedAwaitingNewSession } from "../src/activation.js";
 
 // pnpm test always runs from the repository root.
 const hookBin = join(process.cwd(), "claude-code", "dist", "claude-hook.js");
+const connectBin = join(process.cwd(), "claude-code", "dist", "connect.js");
 const dialectStdinPath = join(process.cwd(), "test", "testdata", "dialect-SessionStart.json");
 
 function gitEnv(): NodeJS.ProcessEnv {
@@ -43,8 +46,62 @@ function runHookBinary(dataDir: string, eventName: string, stdin: string): void 
   });
 }
 
+async function runConnectBinary(dataDir: string, baseUrl: string): Promise<void> {
+  await new Promise<void>((resolveConnect, rejectConnect) => {
+    execFile(
+      "node",
+      [connectBin, "ABCD1234EFGH", dataDir],
+      { env: { ...process.env, TRINITY_BASE_URL: baseUrl } },
+      (error) => {
+        if (error) {
+          rejectConnect(error);
+          return;
+        }
+        resolveConnect();
+      },
+    );
+  });
+}
+
 test("the committed hook binary exists where hooks.json points", () => {
   assert.ok(existsSync(hookBin), `${hookBin} is missing — run pnpm build:plugin and commit the output`);
+});
+
+test("the committed connect binary reports the hostname and saved device id", async () => {
+  const bodies: unknown[] = [];
+  const dataDir = mkdtempSync(join(tmpdir(), "trinity-pkg-data-"));
+  const server = createServer((req, res) => {
+    if (req.method === "POST" && req.url === "/api/v1/devices/exchange") {
+      let body = "";
+      req.setEncoding("utf8");
+      req.on("data", (chunk: string) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        bodies.push(JSON.parse(body));
+        const address = server.address() as AddressInfo;
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ token: "new-token", deviceId: "dev0", ingestUrl: `http://127.0.0.1:${address.port}/api/v1/ingest/batches` }));
+      });
+      return;
+    }
+    if (req.method === "GET" && req.url === "/api/v1/ingest/policy") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ etag: "e1", ttlSeconds: 900, captureLevel: "metadata", workspaces: [] }));
+      return;
+    }
+    res.writeHead(404).end();
+  });
+  await new Promise<void>((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
+  try {
+    const { port } = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${port}`;
+    saveConfig(dataDir, { token: "old-token", deviceId: "dev0", ingestUrl: `${baseUrl}/api/v1/ingest/batches` });
+    await runConnectBinary(dataDir, baseUrl);
+  } finally {
+    await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+  }
+  assert.deepEqual(bodies, [{ code: "ABCD1234EFGH", hostname: hostname(), deviceId: "dev0" }]);
 });
 
 test("hook commands use the string form every host executes", () => {

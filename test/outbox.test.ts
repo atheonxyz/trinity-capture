@@ -74,6 +74,22 @@ function storedResults(items: readonly CaptureEvent[]): ItemResult[] {
   return items.map((item) => ({ captureEventId: item.captureEventId, outcome: "stored" }));
 }
 
+function readRetiredOutboxCaptureEventId(dataDir: string): string {
+  const retired = readdirSync(join(dataDir, "retired"));
+  assert.equal(retired.length, 1);
+  const oldOutbox = join(dataDir, "retired", retired[0], "outbox");
+  const files = readdirSync(oldOutbox);
+  assert.equal(files.length, 1);
+  const parsed: unknown = JSON.parse(readFileSync(join(oldOutbox, files[0]), "utf8"));
+  if (typeof parsed !== "object" || parsed === null || !("captureEventId" in parsed)) {
+    throw new Error("retired outbox event must be a JSON object with captureEventId");
+  }
+  if (typeof parsed.captureEventId !== "string") {
+    throw new Error("retired outbox event captureEventId must be a string");
+  }
+  return parsed.captureEventId;
+}
+
 async function drainWithFetch(dataDir: string, fetchImpl: typeof fetch): Promise<void> {
   const original = globalThis.fetch;
   globalThis.fetch = fetchImpl;
@@ -143,6 +159,50 @@ test("drain marks a device captured only after an acknowledged delivery", async 
   await drainWithStubFetch(dataDir, (body) => storedResults(body.items));
 
   assert.equal(activationStatus(dataDir), "captured");
+});
+
+test("an old-token drain cannot mark a same-device reconnect captured or delete queued events", async () => {
+  const dataDir = tmpDataDir();
+  const oldCfg: DeviceConfig = { ...cfg, token: "old-token" };
+  const newCfg: DeviceConfig = { ...cfg, token: "new-token" };
+  const event = makeEvent("24242424-2424-2424-2424-242424242424");
+  saveConfig(dataDir, oldCfg);
+  markPairedAwaitingNewSession(dataDir, oldCfg.deviceId);
+  appendEvent(dataDir, event, oldCfg.deviceId);
+
+  await drainWithFetch(
+    dataDir,
+    async (_url: string | Request | URL, init?: RequestInit) => {
+      assert.deepEqual(batchBody(init).items, [event]);
+      saveConfig(dataDir, newCfg);
+      markPairedAwaitingNewSession(dataDir, newCfg.deviceId);
+      return new Response(JSON.stringify({ results: storedResults([event]) }), { status: 200 });
+    },
+  );
+
+  assert.equal(activationStatus(dataDir), "paired-awaiting-new-session");
+  assert.equal(existsSync(join(dataDir, "outbox")), false);
+  assert.equal(readRetiredOutboxCaptureEventId(dataDir), event.captureEventId);
+});
+
+test("an old-token 413 response cannot drop queued events after same-device reconnect", async () => {
+  const dataDir = tmpDataDir();
+  const oldCfg: DeviceConfig = { ...cfg, token: "old-token" };
+  const event = makeEvent("25252525-2525-2525-2525-252525252525");
+  saveConfig(dataDir, oldCfg);
+  appendEvent(dataDir, event, oldCfg.deviceId);
+
+  await drainWithFetch(
+    dataDir,
+    async () => {
+      saveConfig(dataDir, { ...oldCfg, token: "new-token" });
+      return new Response("batch body too large", { status: 413 });
+    },
+  );
+
+  assert.equal(existsSync(join(dataDir, "outbox")), false);
+  assert.equal(readRetiredOutboxCaptureEventId(dataDir), event.captureEventId);
+  assert.equal(existsSync(join(dataDir, "status.json")), false);
 });
 
 test("drain retains the whole outbox on a request-level failure", async () => {

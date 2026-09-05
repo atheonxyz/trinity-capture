@@ -1,3 +1,4 @@
+import { hostname } from "node:os";
 import { loadConfig, saveConfig } from "./config.js";
 import { activationStatus, markPairedAwaitingNewSession } from "./activation.js";
 import { isPolicyFresh } from "./gate.js";
@@ -9,11 +10,15 @@ export function supportsNodeVersion(version) {
     const major = Number.parseInt(version.split(".", 1)[0] ?? "", 10);
     return Number.isInteger(major) && major >= MIN_NODE_MAJOR;
 }
-export async function exchange(baseUrl, code) {
+export async function exchange(baseUrl, code, previousDeviceId) {
     const res = await fetch(`${baseUrl}/api/v1/devices/exchange`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
+        body: JSON.stringify({
+            code,
+            hostname: hostname(),
+            ...(previousDeviceId ? { deviceId: previousDeviceId } : {}),
+        }),
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     if (!res.ok) {
@@ -43,7 +48,7 @@ async function main() {
     try {
         let cfg;
         if (hasPairingCode) {
-            cfg = await exchange(baseUrl, code);
+            cfg = await exchange(baseUrl, code, existingConfig?.deviceId ?? null);
             if (existingConfig && new URL(existingConfig.ingestUrl).origin !== new URL(cfg.ingestUrl).origin) {
                 throw new Error("Existing Trinity connection kept. Use a separate plugin connection to test another environment.");
             }

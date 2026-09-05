@@ -1,5 +1,5 @@
 import { chmodSync, mkdirSync } from "node:fs";
-import { platform } from "node:os";
+import { hostname, platform } from "node:os";
 import { join } from "node:path";
 import { cursorDialect } from "./cursor-hook.js";
 import { exchange } from "./connect.js";
@@ -17,7 +17,7 @@ function securePosixMode(path, mode) {
     chmodSync(path, mode);
 }
 export async function connectCursor(baseUrl, code, dataDir) {
-    const cfg = await exchange(baseUrl, code);
+    const cfg = await exchange(baseUrl, code, loadConfig(dataDir)?.deviceId ?? null);
     await saveCursorConnection(dataDir, cfg);
 }
 async function saveCursorConnection(dataDir, cfg) {
@@ -49,7 +49,7 @@ export async function authorizeCursor(options) {
     openURL(authorization.verificationURL);
     const expiresAt = Date.now() + authorization.expiresInSeconds * 1000;
     while (Date.now() < expiresAt) {
-        const exchange = await exchangeDeviceAuthorization(options.baseUrl, authorization.deviceCode);
+        const exchange = await exchangeDeviceAuthorization(options.baseUrl, authorization.deviceCode, loadConfig(options.dataDir)?.deviceId ?? null);
         if (exchange.status === "connected") {
             await saveCursorConnection(options.dataDir, exchange.config);
             return;
@@ -77,7 +77,7 @@ async function main() {
     try {
         if (code === "") {
             console.log("Opening Trinity to approve this Cursor connection…");
-            await authorizeCursor({ baseUrl, dataDir, deviceName: "Cursor" });
+            await authorizeCursor({ baseUrl, dataDir, deviceName: hostname() });
         }
         else {
             await connectCursor(baseUrl, code, dataDir);

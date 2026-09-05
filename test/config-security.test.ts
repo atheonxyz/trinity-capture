@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig, loadPolicy, saveConfig, savePolicy } from "../src/config.js";
@@ -34,6 +34,31 @@ test("saving the same device preserves its cached capture policy", () => {
   saveConfig(dataDir, config);
 
   assert.equal(loadPolicy(dataDir)?.etag, "policy");
+});
+
+test("rotating the same device token retires credential-scoped local capture state", () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "trinity-config-data-"));
+  const config = { token: "old-token", ingestUrl: "https://ingest.example/api/v1/ingest/batches", deviceId: "device" };
+  saveConfig(dataDir, config);
+  savePolicy(dataDir, { etag: "old-token-policy", fetchedAt: Date.now(), ttlSeconds: 900, captureLevel: "metadata", workspaces: [] });
+  mkdirSync(join(dataDir, "outbox"));
+  mkdirSync(join(dataDir, "active-sessions"));
+  mkdirSync(join(dataDir, "turnkeys"));
+  writeFileSync(join(dataDir, "github-repositories.json"), JSON.stringify([{ name: "old-token-repo" }]));
+
+  saveConfig(dataDir, { ...config, token: "new-token" });
+
+  assert.equal(loadPolicy(dataDir), null);
+  assert.equal(existsSync(join(dataDir, "github-repositories.json")), false);
+  assert.equal(existsSync(join(dataDir, "outbox")), false);
+  assert.equal(existsSync(join(dataDir, "active-sessions")), false);
+  assert.equal(existsSync(join(dataDir, "turnkeys")), false);
+
+  const retired = readdirSync(join(dataDir, "retired"));
+  assert.equal(retired.length, 1);
+  assert.equal(existsSync(join(dataDir, "retired", retired[0], "outbox")), true);
+  assert.equal(existsSync(join(dataDir, "retired", retired[0], "active-sessions")), true);
+  assert.equal(existsSync(join(dataDir, "retired", retired[0], "turnkeys")), true);
 });
 
 test("the device credential file is private to the current user", () => {

@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { DeviceConfig } from "./config.js";
 import { markCaptured } from "./activation.js";
+import { loadConfig, sameConfig, type DeviceConfig } from "./config.js";
 import type { ItemResult } from "./send.js";
 import { BatchRequestError, refreshPolicy, sendBatch } from "./send.js";
 
@@ -41,6 +41,11 @@ interface OutboxEntry {
 }
 
 type StoredCaptureEvent = CaptureEvent & { readonly _deviceId?: string };
+
+function hasStalePersistedConfig(dataDir: string, cfg: DeviceConfig): boolean {
+  const current = loadConfig(dataDir);
+  return current !== null && !sameConfig(current, cfg);
+}
 
 function outboxDir(dataDir: string): string {
   const dir = join(dataDir, "outbox");
@@ -217,6 +222,7 @@ async function deliverBatch(
     }), remaining);
   } catch (err) {
     if (err instanceof BatchRequestError && err.status === 413) {
+      if (hasStalePersistedConfig(dataDir, cfg)) return "abort";
       if (entries.length === 1) {
         rmSync(join(dir, entries[0].file), { force: true });
         recordDrop(dataDir, { reason: "poison", captureEventId: entries[0].event.captureEventId, kind: entries[0].event.kind });
@@ -231,6 +237,8 @@ async function deliverBatch(
     }
     return "abort";
   }
+
+  if (hasStalePersistedConfig(dataDir, cfg)) return "abort";
 
   const resultById = new Map(results.map((r) => [r.captureEventId, r]));
   let policyStale = false;
