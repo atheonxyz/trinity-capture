@@ -14,9 +14,6 @@ export function supportsNodeVersion(version: string): boolean {
   return Number.isInteger(major) && major >= MIN_NODE_MAJOR;
 }
 
-// previousDeviceId is what this data dir already held: it rides the
-// exchange so the server re-tokens that machine instead of minting a
-// second one, and the hostname is what names the machine on the dashboard.
 export async function exchange(baseUrl: string, code: string, previousDeviceId: string | null): Promise<DeviceConfig> {
   const res = await fetch(`${baseUrl}/api/v1/devices/exchange`, {
     method: "POST",

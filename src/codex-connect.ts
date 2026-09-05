@@ -121,17 +121,18 @@ export function connectionStatus(home: string, key = targetKey(DEFAULT_TARGET)):
   return "unpaired";
 }
 
-// The id this install already holds, wherever Codex left it: the plugin
-// data dir's config when the host handed one over, else the confirmed or
-// pending connection file for this target key.
 export function savedDeviceId(home: string, key: string, pluginDataDir: string | undefined): string | null {
   const saved = pluginDataDir ? loadConfig(pluginDataDir)?.deviceId : undefined;
   if (saved) return saved;
   for (const path of [confirmedConfigPath(home, key), pendingConfigPath(home, key)]) {
-    if (!existsSync(path)) continue;
-    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
-    const id = typeof parsed === "object" && parsed !== null ? Reflect.get(parsed, "deviceId") : undefined;
-    if (typeof id === "string" && id !== "") return id;
+    try {
+      const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+      if (typeof parsed === "object" && parsed !== null && "deviceId" in parsed
+        && typeof parsed.deviceId === "string" && parsed.deviceId !== "") return parsed.deviceId;
+    } catch (error) {
+      if (error instanceof SyntaxError || (error instanceof Error && "code" in error && error.code === "ENOENT")) continue;
+      throw error;
+    }
   }
   return null;
 }

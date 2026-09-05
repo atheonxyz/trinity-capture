@@ -356,6 +356,18 @@ test("savedDeviceId returns null when neither a data dir config nor a connection
   assert.equal(savedDeviceId(home, key, undefined), null);
 });
 
+test("savedDeviceId allows reconnect when a saved connection file contains malformed JSON", () => {
+  const home = tmpHome();
+  const key = "test-target";
+  writeConnectionFile(confirmedConfigPath(home, key), { deviceId: "old-device" });
+  writeFileSync(confirmedConfigPath(home, key), "{");
+
+  assert.equal(savedDeviceId(home, key, undefined), null);
+
+  writeConnectionFile(pendingConfigPath(home, key), { deviceId: "pending-device" });
+  assert.equal(savedDeviceId(home, key, undefined), "pending-device");
+});
+
 test("savedDeviceId skips a confirmed file with an empty deviceId and falls through to the pending file", () => {
   const home = tmpHome();
   const key = "test-target";

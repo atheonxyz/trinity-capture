@@ -89,8 +89,6 @@ test("pairs a device, replays a session, and reads it back through the dashboard
   }
   const baseUrl = e2eURL;
 
-  // 1. A person requests a pairing code (dashboard-side; the plugin has no
-  // equivalent call, so this alone is a plain authenticated fetch).
   const codeRes = await fetch(`${baseUrl}/api/v1/devices/code`, {
     method: "POST",
     headers: { Authorization: `Bearer ${sessionToken}`, "Content-Type": "application/json" },
@@ -99,12 +97,9 @@ test("pairs a device, replays a session, and reads it back through the dashboard
   if (codeRes.status !== 200) assert.fail(`POST /devices/code: ${codeRes.status} ${await codeRes.text()}`);
   const { code } = (await codeRes.json()) as { code: string };
 
-  // 2. The plugin's own exchange() — real client code, not a raw fetch.
   const cfg: DeviceConfig = await exchange(baseUrl, code, null);
   assert.ok(cfg.token && cfg.deviceId && cfg.ingestUrl);
 
-  // 2b. Re-pairing the same data dir's saved deviceId reconnects the same
-  // machine instead of minting a second one.
   const secondCodeRes = await fetch(`${baseUrl}/api/v1/devices/code`, {
     method: "POST",
     headers: { Authorization: `Bearer ${sessionToken}`, "Content-Type": "application/json" },
@@ -117,15 +112,18 @@ test("pairs a device, replays a session, and reads it back through the dashboard
 
   const dataDir = mkdtempSync(join(tmpdir(), "trinity-e2e-"));
   saveConfig(dataDir, cfg);
+  const staleTokenRes = await fetch(cfg.ingestUrl.replace(/\/batches$/, "/policy"), {
+    headers: { Authorization: `Bearer ${cfg.token}` },
+  });
+  assert.equal(staleTokenRes.status, 401, "re-pairing must revoke the previous device token");
+  saveConfig(dataDir, again);
 
-  // 3. The plugin's own policy fetch — asserts the seeded repo is allowlisted.
-  const policy = await refreshPolicy(dataDir, cfg);
+  const policy = await refreshPolicy(dataDir, again);
   assert.ok(policy, "policy fetch failed");
   const entry = policy.workspaces.find((w) => w.canonicalRepo === "github.com/acme/claude-code-fixture");
   assert.ok(entry, "seeded repo missing from policy");
   assert.match(entry.route, /^project:/);
 
-  // 4. Replay the Task 5.1 fixture through the real outbox/send path.
   // Resolved from cwd (pnpm test always runs from the repository root), not
   // import.meta.url: tsc doesn't copy this .jsonl asset into dist-test/.
   const fixturePath = join(process.cwd(), "test/testdata/claude_code_session.jsonl");
@@ -141,9 +139,8 @@ test("pairs a device, replays a session, and reads it back through the dashboard
     };
     appendEvent(dataDir, ev);
   }
-  await drain(dataDir, cfg, { inline: false, deadline: 0 });
+  await drain(dataDir, again, { inline: false, deadline: 0 });
 
-  // 5. Poll the dashboard API — real person-session bearer, not the device token.
   let session: SessionDTO | undefined;
   let sessionID: string | undefined;
   const deadline = Date.now() + sessionPollDeadlineMs;
@@ -164,8 +161,6 @@ test("pairs a device, replays a session, and reads it back through the dashboard
   // Title fallback: no gold title yet, so it's the first turn's prompt.
   assert.equal(session.title, "Add the claude_code adapter");
 
-  // 6. tool_calls carries no bodies — the sessions list DTO doesn't expose
-  // it, so this is a direct, read-only check against the seeded database.
   const toolCalls = execFileSync(
     "psql",
     [postgresURL, "-tA", "-c",
