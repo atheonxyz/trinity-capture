@@ -4,6 +4,8 @@ Trinity Capture is designed to keep unrelated work local.
 
 ## Data processed
 
+During pairing and capture uploads, the plugin sends your machine's hostname and its saved device identifier when available. Trinity uses them to name and reconnect the machine. The hostname appears alongside your sessions and is visible to teammates who can view your IDE activity.
+
 For repositories enabled in Trinity, the plugin may send:
 
 - User prompts and assistant responses.

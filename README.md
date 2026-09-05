@@ -59,6 +59,8 @@ Cursor waits for the browser approval, stores its credential in the operating sy
 
 Capture is allowlist-first. The plugin reads the current Git remote locally and stays silent unless it matches a repository enabled in one of your Trinity projects.
 
+Pairing and capture uploads include your machine's hostname. Trinity displays it beside your sessions to teammates who can view your IDE activity. Reconnecting also sends the saved device identifier so the same installation keeps its history.
+
 For a matching repository, Trinity receives:
 
 - The prompt and assistant response for each turn.
