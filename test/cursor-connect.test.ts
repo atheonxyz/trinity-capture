@@ -15,7 +15,7 @@ function tmpParentDir(): string {
 
 function stubExchange(deviceConfig: DeviceConfig): () => void {
   const original = globalThis.fetch;
-  globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+  globalThis.fetch = (async (url: string | URL) => {
     const href = String(url);
     if (href.endsWith("/api/v1/devices/exchange")) {
       return new Response(JSON.stringify(deviceConfig), { status: 200 });
