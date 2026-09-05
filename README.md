@@ -59,7 +59,9 @@ Cursor waits for the browser approval, stores its credential in the operating sy
 
 Capture is allowlist-first. The plugin reads the current Git remote locally and stays silent unless it matches a repository enabled in one of your Trinity projects.
 
-Pairing and capture uploads include your machine's hostname. Trinity displays it beside your sessions to teammates who can view your IDE activity. Reconnecting also sends the saved device identifier so the same installation keeps its history.
+Pairing sends your machine's hostname and a Trinity-specific machine identity. The identity is an HMAC-SHA256 digest derived locally from the operating system's machine identifier, so the raw OS identifier is never sent, logged, or stored by the plugin. Capture uploads include the saved Trinity device credential returned by pairing, but do not recompute or resend the OS machine identity.
+
+The machine identity identifies an OS installation, not a physical device. Reinstalling the OS, resetting a VM, or regenerating `/etc/machine-id` can produce a new identity for the same hardware. Cloned disks or VM images can share an identity until they are regenerated. Trinity uses this value for pairing continuity and device deduplication; it is not hardware attestation or fraud protection.
 
 For a matching repository, Trinity receives:
 

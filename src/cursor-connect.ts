@@ -7,6 +7,7 @@ import { activationStatus, markPairedAwaitingNewSession } from "./activation.js"
 import { loadConfig, saveConfig, type DeviceConfig } from "./config.js";
 import { isPolicyFresh } from "./gate.js";
 import { isMainModule } from "./main-module.js";
+import { readMachineId, type MachineIdReader } from "./machine-identity.js";
 import { refreshPolicy } from "./send.js";
 import { exchangeDeviceAuthorization, openBrowserURL, startDeviceAuthorization, wait } from "./device-authorization.js";
 
@@ -19,7 +20,7 @@ function securePosixMode(path: string, mode: number): void {
 }
 
 export async function connectCursor(baseUrl: string, code: string, dataDir: string): Promise<void> {
-  const cfg = await exchange(baseUrl, code, loadConfig(dataDir)?.deviceId ?? null);
+  const cfg = await exchange(baseUrl, code);
   await saveCursorConnection(dataDir, cfg);
 }
 
@@ -46,9 +47,12 @@ type AuthorizeCursorOptions = {
   readonly openURL?: (url: string) => void;
   readonly showVerificationCode?: (code: string) => void;
   readonly wait?: (milliseconds: number) => Promise<void>;
+  readonly machineId?: MachineIdReader;
 };
 
 export async function authorizeCursor(options: AuthorizeCursorOptions): Promise<void> {
+  const machineId = options.machineId ?? readMachineId;
+  const stableMachineId = await machineId();
   const authorization = await startDeviceAuthorization(options.baseUrl, options.deviceName);
   const openURL = options.openURL ?? ((url: string) => {
     if (!openBrowserURL(url)) console.log(`Open this link to connect Cursor: ${url}`);
@@ -62,7 +66,7 @@ export async function authorizeCursor(options: AuthorizeCursorOptions): Promise<
 
   const expiresAt = Date.now() + authorization.expiresInSeconds * 1000;
   while (Date.now() < expiresAt) {
-    const exchange = await exchangeDeviceAuthorization(options.baseUrl, authorization.deviceCode, loadConfig(options.dataDir)?.deviceId ?? null);
+    const exchange = await exchangeDeviceAuthorization(options.baseUrl, authorization.deviceCode, stableMachineId);
     if (exchange.status === "connected") {
       await saveCursorConnection(options.dataDir, exchange.config);
       return;

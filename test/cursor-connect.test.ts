@@ -8,16 +8,18 @@ import { cursorDialect } from "../src/cursor-hook.js";
 import { loadConfig, saveConfig, savePolicy } from "../src/config.js";
 import type { DeviceConfig, Policy } from "../src/config.js";
 import { activationStatus } from "../src/activation.js";
+import type { MachineIdReader } from "../src/machine-identity.js";
 
 function tmpParentDir(): string {
   return mkdtempSync(join(tmpdir(), "trinity-cursor-connect-"));
 }
 
-function stubExchange(deviceConfig: DeviceConfig): () => void {
+function stubExchange(deviceConfig: DeviceConfig, bodies: unknown[] = []): () => void {
   const original = globalThis.fetch;
-  globalThis.fetch = (async (url: string | URL) => {
+  globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
     const href = String(url);
     if (href.endsWith("/api/v1/devices/exchange")) {
+      bodies.push(JSON.parse(String(init?.body)));
       return new Response(JSON.stringify(deviceConfig), { status: 200 });
     }
     if (href.endsWith("/api/v1/ingest/policy")) {
@@ -35,6 +37,8 @@ function stubExchange(deviceConfig: DeviceConfig): () => void {
   };
 }
 
+const testMachineId: MachineIdReader = async () => "b".repeat(64);
+
 function policy(): Policy {
   return {
     etag: "policy-1",
@@ -45,10 +49,20 @@ function policy(): Policy {
   };
 }
 
+function readMachineId(body: unknown): string {
+  assert.ok(typeof body === "object" && body !== null && "machineId" in body);
+  const machineId = Reflect.get(body, "machineId");
+  if (typeof machineId !== "string") assert.fail("machineId must be a string");
+  assert.match(machineId, /^[0-9a-f]{64}$/);
+  assert.ok(!("deviceId" in body), "pairing request must not reuse the saved device id");
+  return machineId;
+}
+
 test("connect writes a 0700 data dir and a 0600 config.json a device did not have before", async () => {
   const parent = tmpParentDir();
   const dataDir = join(parent, "cursor");
-  const restore = stubExchange({ token: "tok-1", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev-1" });
+  const bodies: unknown[] = [];
+  const restore = stubExchange({ token: "tok-1", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev-1" }, bodies);
   try {
     await connectCursor("http://example.invalid", "PAIR-CODE", dataDir);
   } finally {
@@ -66,6 +80,7 @@ test("connect writes a 0700 data dir and a 0600 config.json a device did not hav
 
   const cfg = JSON.parse(readFileSync(cfgPath, "utf8")) as { token: string; ingestUrl: string; deviceId: string };
   assert.deepEqual(cfg, { token: "tok-1", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev-1" });
+  assert.deepEqual(bodies, [{ code: "PAIR-CODE", hostname: hostname(), machineId: readMachineId(bodies[0]) }]);
   assert.ok(existsSync(join(dataDir, "policy.json")));
   assert.equal(activationStatus(dataDir), "paired-awaiting-new-session");
 });
@@ -90,7 +105,7 @@ test("browser authorization opens Trinity and waits until approval before saving
     }
     if (href.endsWith("/api/v1/devices/authorize/exchange")) {
       exchanges++;
-      assert.deepEqual(JSON.parse(String(init?.body)), { deviceCode: "device-secret", hostname: hostname() });
+      assert.deepEqual(JSON.parse(String(init?.body)), { deviceCode: "device-secret", hostname: hostname(), machineId: "b".repeat(64) });
       return exchanges === 1
         ? Response.json({ status: "pending" }, { status: 202 })
         : Response.json({ token: "tok-browser", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev-browser" });
@@ -109,6 +124,7 @@ test("browser authorization opens Trinity and waits until approval before saving
       openURL: (url) => opened.push(url),
       showVerificationCode: (code) => shownCodes.push(code),
       wait: async () => undefined,
+      machineId: testMachineId,
     });
   } finally {
     globalThis.fetch = original;
@@ -139,6 +155,35 @@ test("browser authorization rejects a verification URL outside Trinity", async (
   } finally {
     globalThis.fetch = original;
   }
+});
+
+test("browser authorization fails before opening Trinity when machine identity is unavailable", async () => {
+  const parent = tmpParentDir();
+  const opened: string[] = [];
+  const original = globalThis.fetch;
+  let fetches = 0;
+  globalThis.fetch = (async () => {
+    fetches++;
+    return Response.json({});
+  }) as typeof fetch;
+  try {
+    await assert.rejects(
+      authorizeCursor({
+        baseUrl: "https://api.usetrinity.ai",
+        dataDir: join(parent, "cursor"),
+        deviceName: "Cursor",
+        openURL: (url) => opened.push(url),
+        machineId: async () => {
+          throw new Error("Machine identity unavailable.");
+        },
+      }),
+      /Machine identity unavailable/,
+    );
+  } finally {
+    globalThis.fetch = original;
+  }
+  assert.equal(fetches, 0);
+  assert.deepEqual(opened, []);
 });
 
 test("connect is idempotent: reconnecting re-secures permissions on an already-existing dir", async () => {

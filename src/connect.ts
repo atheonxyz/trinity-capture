@@ -4,6 +4,7 @@ import type { DeviceConfig } from "./config.js";
 import { activationStatus, markPairedAwaitingNewSession } from "./activation.js";
 import { isPolicyFresh } from "./gate.js";
 import { isMainModule } from "./main-module.js";
+import { readMachineId, type MachineIdReader } from "./machine-identity.js";
 import { refreshPolicy, REQUEST_TIMEOUT_MS } from "./send.js";
 
 export const DEFAULT_BASE_URL = "https://api.usetrinity.ai";
@@ -14,14 +15,15 @@ export function supportsNodeVersion(version: string): boolean {
   return Number.isInteger(major) && major >= MIN_NODE_MAJOR;
 }
 
-export async function exchange(baseUrl: string, code: string, previousDeviceId: string | null): Promise<DeviceConfig> {
+export async function exchange(baseUrl: string, code: string, machineId: MachineIdReader = readMachineId): Promise<DeviceConfig> {
+  const stableMachineId = await machineId();
   const res = await fetch(`${baseUrl}/api/v1/devices/exchange`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       code,
       hostname: hostname(),
-      ...(previousDeviceId ? { deviceId: previousDeviceId } : {}),
+      machineId: stableMachineId,
     }),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
@@ -57,7 +59,7 @@ async function main(): Promise<void> {
   try {
     let cfg: DeviceConfig;
     if (hasPairingCode) {
-      cfg = await exchange(baseUrl, code, existingConfig?.deviceId ?? null);
+      cfg = await exchange(baseUrl, code);
       if (existingConfig && new URL(existingConfig.ingestUrl).origin !== new URL(cfg.ingestUrl).origin) {
         throw new Error("Existing Trinity connection kept. Use a separate plugin connection to test another environment.");
       }

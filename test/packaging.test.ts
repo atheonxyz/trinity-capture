@@ -67,7 +67,7 @@ test("the committed hook binary exists where hooks.json points", () => {
   assert.ok(existsSync(hookBin), `${hookBin} is missing — run pnpm build:plugin and commit the output`);
 });
 
-test("the committed connect binary reports the hostname and saved device id", async () => {
+test("the committed connect binary reports the hostname and stable machine id", async () => {
   const bodies: unknown[] = [];
   const dataDir = mkdtempSync(join(tmpdir(), "trinity-pkg-data-"));
   const server = createServer((req, res) => {
@@ -101,8 +101,17 @@ test("the committed connect binary reports the hostname and saved device id", as
   } finally {
     await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
   }
-  assert.deepEqual(bodies, [{ code: "ABCD1234EFGH", hostname: hostname(), deviceId: "dev0" }]);
+  assert.deepEqual(bodies, [{ code: "ABCD1234EFGH", hostname: hostname(), machineId: readMachineId(bodies[0]) }]);
 });
+
+function readMachineId(body: unknown): string {
+  assert.ok(typeof body === "object" && body !== null && "machineId" in body);
+  const machineId = Reflect.get(body, "machineId");
+  if (typeof machineId !== "string") assert.fail("machineId must be a string");
+  assert.match(machineId, /^[0-9a-f]{64}$/);
+  assert.ok(!("deviceId" in body), "pairing request must not reuse the saved device id");
+  return machineId;
+}
 
 test("hook commands use the string form every host executes", () => {
   const manifest = JSON.parse(readFileSync(join(process.cwd(), "claude-code", "hooks", "hooks.json"), "utf8")) as {
