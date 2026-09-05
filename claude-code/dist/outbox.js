@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { markCaptured } from "./activation.js";
+import { loadConfig, sameConfig } from "./config.js";
 import { BatchRequestError, refreshPolicy, sendBatch } from "./send.js";
 const MAX_BATCHES = 5;
 export const INLINE_DRAIN_BUDGET_MS = 2_000;
@@ -11,6 +12,10 @@ const MAX_RETRY_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_OUTBOX_EVENTS = 2_000;
 const MAX_OUTBOX_BYTES = 16 * 1024 * 1024;
 const MAX_DROP_RECORDS = 100;
+function hasStalePersistedConfig(dataDir, cfg) {
+    const current = loadConfig(dataDir);
+    return current !== null && !sameConfig(current, cfg);
+}
 function outboxDir(dataDir) {
     const dir = join(dataDir, "outbox");
     mkdirSync(dir, { recursive: true });
@@ -178,6 +183,8 @@ async function deliverBatch(dir, dataDir, cfg, entries, options) {
     }
     catch (err) {
         if (err instanceof BatchRequestError && err.status === 413) {
+            if (hasStalePersistedConfig(dataDir, cfg))
+                return "abort";
             if (entries.length === 1) {
                 rmSync(join(dir, entries[0].file), { force: true });
                 recordDrop(dataDir, { reason: "poison", captureEventId: entries[0].event.captureEventId, kind: entries[0].event.kind });
@@ -194,6 +201,8 @@ async function deliverBatch(dir, dataDir, cfg, entries, options) {
         }
         return "abort";
     }
+    if (hasStalePersistedConfig(dataDir, cfg))
+        return "abort";
     const resultById = new Map(results.map((r) => [r.captureEventId, r]));
     let policyStale = false;
     for (const { file, event } of entries) {

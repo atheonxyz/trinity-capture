@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export interface DeviceConfig {
@@ -50,8 +50,21 @@ export function loadConfig(dir: string): DeviceConfig | null {
   return cfg;
 }
 
+export function sameConfig(left: DeviceConfig, right: DeviceConfig): boolean {
+  return left.deviceId === right.deviceId && left.token === right.token && left.ingestUrl === right.ingestUrl;
+}
+
+export function isCurrentConfig(dir: string, cfg: DeviceConfig): boolean {
+  const current = loadConfig(dir);
+  return current !== null && sameConfig(current, cfg);
+}
+
 export function saveConfig(dir: string, cfg: DeviceConfig): void {
   const existing = loadConfig(dir);
+  if (existing === null || !sameConfig(existing, cfg)) {
+    rmSync(join(dir, "policy.json"), { force: true });
+    rmSync(join(dir, "github-repositories.json"), { force: true });
+  }
   if (existing === null || existing.deviceId !== cfg.deviceId) {
     const sources = ["outbox", "active-sessions", "turnkeys"].filter((name) => existsSync(join(dir, name)));
     if (sources.length > 0) {
@@ -59,12 +72,6 @@ export function saveConfig(dir: string, cfg: DeviceConfig): void {
       mkdirSync(retired, { recursive: true, mode: 0o700 });
       for (const name of sources) renameSync(join(dir, name), join(retired, name));
     }
-    try {
-      unlinkSync(join(dir, "policy.json"));
-    } catch (error) {
-      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
-    }
-    rmSync(join(dir, "github-repositories.json"), { force: true });
   }
   writeJSON(dir, "config.json", cfg);
 }

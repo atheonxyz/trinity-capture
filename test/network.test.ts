@@ -24,6 +24,21 @@ test("an in-flight old-device policy cannot overwrite a replacement pairing", as
   assert.equal(loadPolicy(dataDir), null);
 });
 
+test("an in-flight old-token policy cannot overwrite a same-device reconnect", async (t) => {
+  const dataDir = mkdtempSync(join(tmpdir(), "trinity-network-data-"));
+  const cfg = { token: "old-token", ingestUrl: "https://ingest.example/api/v1/ingest/batches", deviceId: "device" };
+  saveConfig(dataDir, cfg);
+  t.mock.method(globalThis, "fetch", async () => {
+    saveConfig(dataDir, { ...cfg, token: "new-token" });
+    return Response.json({ etag: "old-token-policy", ttlSeconds: 900, captureLevel: "metadata", workspaces: [] });
+  });
+
+  const policy = await refreshPolicy(dataDir, cfg);
+
+  assert.equal(policy, null);
+  assert.equal(loadPolicy(dataDir), null);
+});
+
 test("plugin HTTP requests carry a bounded abort signal", async () => {
   assert.equal(REQUEST_TIMEOUT_MS, 5_000);
   const dataDir = mkdtempSync(join(tmpdir(), "trinity-network-data-"));
