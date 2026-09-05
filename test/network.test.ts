@@ -67,7 +67,7 @@ test("plugin HTTP requests carry a bounded abort signal", async () => {
     return Response.json({ results: [{ captureEventId: event.captureEventId, outcome: "stored" }] });
   }) as typeof fetch;
   try {
-    await exchange("https://api.example", "ABCD1234EFGH", null);
+    await exchange("https://api.example", "ABCD1234EFGH", async () => "d".repeat(64));
     await refreshPolicy(dataDir, cfg);
     await sendBatch(cfg, [event]);
   } finally {
@@ -75,7 +75,7 @@ test("plugin HTTP requests carry a bounded abort signal", async () => {
   }
 });
 
-test("exchange reports the hostname and the saved device id", async () => {
+test("exchange reports the hostname and stable machine id", async () => {
   const bodies: unknown[] = [];
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
@@ -83,15 +83,31 @@ test("exchange reports the hostname and the saved device id", async () => {
     return Response.json({ token: "tok", deviceId: "dev1", ingestUrl: "https://ingest.example/api/v1/ingest/batches" });
   }) as typeof fetch;
   try {
-    await exchange("https://api.example", "ABCD1234EFGH", "dev0");
-    await exchange("https://api.example", "ABCD1234EFGH", null);
+    await exchange("https://api.example", "ABCD1234EFGH", async () => "a".repeat(64));
   } finally {
     globalThis.fetch = originalFetch;
   }
-  assert.deepEqual(bodies, [
-    { code: "ABCD1234EFGH", hostname: hostname(), deviceId: "dev0" },
-    { code: "ABCD1234EFGH", hostname: hostname() },
-  ]);
+  assert.deepEqual(bodies, [{ code: "ABCD1234EFGH", hostname: hostname(), machineId: "a".repeat(64) }]);
+});
+
+test("exchange fails closed before network I/O when machine identity is unavailable", async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls++;
+    return Response.json({});
+  }) as typeof fetch;
+  try {
+    await assert.rejects(
+      exchange("https://api.example", "ABCD1234EFGH", async () => {
+        throw new Error("Machine identity unavailable.");
+      }),
+      /Machine identity unavailable/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(calls, 0);
 });
 
 test("a batch carries the machine's hostname beside its items", async () => {

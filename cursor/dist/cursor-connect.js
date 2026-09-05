@@ -7,6 +7,7 @@ import { activationStatus, markPairedAwaitingNewSession } from "./activation.js"
 import { loadConfig, saveConfig } from "./config.js";
 import { isPolicyFresh } from "./gate.js";
 import { isMainModule } from "./main-module.js";
+import { readMachineId } from "./machine-identity.js";
 import { refreshPolicy } from "./send.js";
 import { exchangeDeviceAuthorization, openBrowserURL, startDeviceAuthorization, wait } from "./device-authorization.js";
 const DEFAULT_BASE_URL = "https://api.usetrinity.ai";
@@ -17,7 +18,7 @@ function securePosixMode(path, mode) {
     chmodSync(path, mode);
 }
 export async function connectCursor(baseUrl, code, dataDir) {
-    const cfg = await exchange(baseUrl, code, loadConfig(dataDir)?.deviceId ?? null);
+    const cfg = await exchange(baseUrl, code);
     await saveCursorConnection(dataDir, cfg);
 }
 async function saveCursorConnection(dataDir, cfg) {
@@ -36,6 +37,8 @@ async function saveCursorConnection(dataDir, cfg) {
     }
 }
 export async function authorizeCursor(options) {
+    const machineId = options.machineId ?? readMachineId;
+    const stableMachineId = await machineId();
     const authorization = await startDeviceAuthorization(options.baseUrl, options.deviceName);
     const openURL = options.openURL ?? ((url) => {
         if (!openBrowserURL(url))
@@ -49,7 +52,7 @@ export async function authorizeCursor(options) {
     openURL(authorization.verificationURL);
     const expiresAt = Date.now() + authorization.expiresInSeconds * 1000;
     while (Date.now() < expiresAt) {
-        const exchange = await exchangeDeviceAuthorization(options.baseUrl, authorization.deviceCode, loadConfig(options.dataDir)?.deviceId ?? null);
+        const exchange = await exchangeDeviceAuthorization(options.baseUrl, authorization.deviceCode, stableMachineId);
         if (exchange.status === "connected") {
             await saveCursorConnection(options.dataDir, exchange.config);
             return;

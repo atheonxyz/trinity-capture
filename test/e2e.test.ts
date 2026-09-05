@@ -97,7 +97,7 @@ test("pairs a device, replays a session, and reads it back through the dashboard
   if (codeRes.status !== 200) assert.fail(`POST /devices/code: ${codeRes.status} ${await codeRes.text()}`);
   const { code } = (await codeRes.json()) as { code: string };
 
-  const cfg: DeviceConfig = await exchange(baseUrl, code, null);
+  const cfg: DeviceConfig = await exchange(baseUrl, code);
   assert.ok(cfg.token && cfg.deviceId && cfg.ingestUrl);
 
   const secondCodeRes = await fetch(`${baseUrl}/api/v1/devices/code`, {
@@ -107,7 +107,7 @@ test("pairs a device, replays a session, and reads it back through the dashboard
   });
   if (secondCodeRes.status !== 200) assert.fail(`POST /devices/code: ${secondCodeRes.status} ${await secondCodeRes.text()}`);
   const { code: secondCode } = (await secondCodeRes.json()) as { code: string };
-  const again: DeviceConfig = await exchange(baseUrl, secondCode, cfg.deviceId);
+  const again: DeviceConfig = await exchange(baseUrl, secondCode);
   assert.equal(again.deviceId, cfg.deviceId, "a re-pair from the same data dir reconnects the same device");
 
   const dataDir = mkdtempSync(join(tmpdir(), "trinity-e2e-"));

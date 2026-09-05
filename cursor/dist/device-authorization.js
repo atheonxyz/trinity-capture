@@ -48,11 +48,11 @@ export async function startDeviceAuthorization(baseURL, deviceName) {
         intervalSeconds: requiredPositiveNumber(body, "intervalSeconds"),
     };
 }
-export async function exchangeDeviceAuthorization(baseURL, deviceCode, previousDeviceId) {
+export async function exchangeDeviceAuthorization(baseURL, deviceCode, machineId) {
     const response = await fetch(`${baseURL}/api/v1/devices/authorize/exchange`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ deviceCode, hostname: hostname(), ...(previousDeviceId ? { deviceId: previousDeviceId } : {}) }),
+        body: JSON.stringify({ deviceCode, hostname: hostname(), machineId }),
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
     if (response.status === 202)

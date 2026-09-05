@@ -2,7 +2,7 @@
   "name": "trinity",
   "displayName": "Trinity",
   "description": "Captures Claude Code sessions into Trinity for allowlisted repositories.",
-  "version": "0.2.7",
+  "version": "0.2.8",
   "author": {
     "name": "Trinity"
   }

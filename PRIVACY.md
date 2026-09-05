@@ -4,7 +4,9 @@ Trinity Capture is designed to keep unrelated work local.
 
 ## Data processed
 
-During pairing and capture uploads, the plugin sends your machine's hostname and its saved device identifier when available. Trinity uses them to name and reconnect the machine. The hostname appears alongside your sessions and is visible to teammates who can view your IDE activity.
+During pairing, the plugin sends your machine's hostname and a Trinity-specific machine identity. The identity is an HMAC-SHA256 digest derived locally from the operating system's machine identifier. The raw OS identifier is never sent, logged, stored, or written to plugin configuration. Capture uploads use the saved Trinity device credential returned by pairing and do not recompute or resend the OS machine identity.
+
+This identity follows the OS installation, not guaranteed physical hardware. Reinstalling the OS, resetting a VM, or regenerating `/etc/machine-id` can create a new identity on the same hardware. Cloned disks or VM images can share one until they are regenerated. Trinity uses it for pairing continuity and device deduplication; it is not hardware attestation or fraud protection.
 
 For repositories enabled in Trinity, the plugin may send:
 
@@ -24,6 +26,7 @@ The plugin does not send:
 - Tool input, tool output, shell output, file contents, or reasoning text.
 - Environment variables or stored credentials.
 - Cursor's `user_email` field.
+- The raw macOS platform UUID, Windows MachineGuid, or Linux `/etc/machine-id`.
 
 ## Local storage
 

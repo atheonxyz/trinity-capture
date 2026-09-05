@@ -6,10 +6,11 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { exchange } from "../src/connect.js";
-import { codexHome, confirmedConfigPath, pendingConfigPath, promotePendingConfig, savedDeviceId, targetKeyForPluginData, writePendingConfig } from "../src/codex-connect.js";
+import { codexHome, confirmedConfigPath, pendingConfigPath, promotePendingConfig, targetKeyForPluginData, writePendingConfig } from "../src/codex-connect.js";
 import { loadConfig, loadPolicy, saveConfig, savePolicy } from "../src/config.js";
 import type { DeviceConfig } from "../src/config.js";
 import { activationStatus } from "../src/activation.js";
+import type { MachineIdReader } from "../src/machine-identity.js";
 
 const fetchOriginal = globalThis.fetch;
 test.beforeEach(() => {
@@ -62,13 +63,6 @@ function tmpPluginDataWithKey(key: string): string {
   return dir;
 }
 
-// Writes a connection file directly (bypassing writePendingConfig's
-// DeviceConfig typing) so a test can shape a malformed or partial record.
-function writeConnectionFile(path: string, value: unknown): void {
-  mkdirSync(join(path, ".."), { recursive: true });
-  writeFileSync(path, JSON.stringify(value));
-}
-
 function mode(path: string): number {
   return statSync(path).mode & 0o777;
 }
@@ -104,6 +98,8 @@ async function withStubServer<T>(cfg: DeviceConfig, fn: (baseUrl: string) => Pro
   }
 }
 
+const testMachineId: MachineIdReader = async () => "c".repeat(64);
+
 test("codexHome resolves CODEX_HOME, defaulting under the user's home directory", () => {
   assert.equal(codexHome({ CODEX_HOME: "/custom/codex" }), "/custom/codex");
   const withoutOverride = codexHome({});
@@ -128,7 +124,7 @@ test("the full connect flow: exchange against a stub server, write pending, prom
   const pluginData = tmpPluginData();
   const cfg: DeviceConfig = { token: "tok-e2e", ingestUrl: "https://api.example/api/v1/ingest/batches", deviceId: "dev-e2e" };
 
-  const exchanged = await withStubServer(cfg, (baseUrl) => exchange(baseUrl, "PAIR-CODE", null));
+  const exchanged = await withStubServer(cfg, (baseUrl) => exchange(baseUrl, "PAIR-CODE", testMachineId));
   assert.deepEqual(exchanged, cfg);
 
   writePendingConfig(home, exchanged);
@@ -300,88 +296,4 @@ test("promotion never leaves the destination writable to group or other", async 
 
   const configMode = mode(join(pluginData, "config.json"));
   assert.equal(configMode & 0o077, 0, `group/other must have no access: mode ${configMode.toString(8)}`);
-});
-
-test("savedDeviceId prefers the plugin data dir's config over both connection files", () => {
-  const home = tmpHome();
-  const pluginData = tmpPluginData();
-  const key = "test-target";
-  saveConfig(pluginData, { token: "tok", ingestUrl: "https://api.example/api/v1/ingest/batches", deviceId: "data-dir-device" });
-  writeConnectionFile(confirmedConfigPath(home, key), { deviceId: "confirmed-device" });
-  writeConnectionFile(pendingConfigPath(home, key), { deviceId: "pending-device" });
-
-  assert.equal(savedDeviceId(home, key, pluginData), "data-dir-device");
-});
-
-test("savedDeviceId falls through to the connection files when the plugin data dir holds no config", () => {
-  const home = tmpHome();
-  const pluginData = tmpPluginData();
-  const key = "test-target";
-  writeConnectionFile(confirmedConfigPath(home, key), { deviceId: "confirmed-device" });
-
-  assert.equal(savedDeviceId(home, key, pluginData), "confirmed-device");
-});
-
-test("savedDeviceId falls back to the confirmed file when no plugin data dir is given", () => {
-  const home = tmpHome();
-  const key = "test-target";
-  writeConnectionFile(confirmedConfigPath(home, key), { deviceId: "confirmed-device" });
-
-  assert.equal(savedDeviceId(home, key, undefined), "confirmed-device");
-});
-
-test("savedDeviceId falls back to the pending file when only it exists", () => {
-  const home = tmpHome();
-  const key = "test-target";
-  writeConnectionFile(pendingConfigPath(home, key), { deviceId: "pending-device" });
-
-  assert.equal(savedDeviceId(home, key, undefined), "pending-device");
-});
-
-test("savedDeviceId prefers the confirmed file over the pending file when both exist", () => {
-  const home = tmpHome();
-  const key = "test-target";
-  writeConnectionFile(confirmedConfigPath(home, key), { deviceId: "confirmed-device" });
-  writeConnectionFile(pendingConfigPath(home, key), { deviceId: "pending-device" });
-
-  assert.equal(savedDeviceId(home, key, undefined), "confirmed-device");
-});
-
-test("savedDeviceId returns null when neither a data dir config nor a connection file exists", () => {
-  const home = tmpHome();
-  const pluginData = tmpPluginData();
-  const key = "test-target";
-
-  assert.equal(savedDeviceId(home, key, pluginData), null);
-  assert.equal(savedDeviceId(home, key, undefined), null);
-});
-
-test("savedDeviceId allows reconnect when a saved connection file contains malformed JSON", () => {
-  const home = tmpHome();
-  const key = "test-target";
-  writeConnectionFile(confirmedConfigPath(home, key), { deviceId: "old-device" });
-  writeFileSync(confirmedConfigPath(home, key), "{");
-
-  assert.equal(savedDeviceId(home, key, undefined), null);
-
-  writeConnectionFile(pendingConfigPath(home, key), { deviceId: "pending-device" });
-  assert.equal(savedDeviceId(home, key, undefined), "pending-device");
-});
-
-test("savedDeviceId skips a confirmed file with an empty deviceId and falls through to the pending file", () => {
-  const home = tmpHome();
-  const key = "test-target";
-  writeConnectionFile(confirmedConfigPath(home, key), { deviceId: "" });
-  writeConnectionFile(pendingConfigPath(home, key), { deviceId: "pending-device" });
-
-  assert.equal(savedDeviceId(home, key, undefined), "pending-device");
-});
-
-test("savedDeviceId skips a confirmed file with no deviceId field and falls through to the pending file", () => {
-  const home = tmpHome();
-  const key = "test-target";
-  writeConnectionFile(confirmedConfigPath(home, key), { note: "no deviceId here" });
-  writeConnectionFile(pendingConfigPath(home, key), { deviceId: "pending-device" });
-
-  assert.equal(savedDeviceId(home, key, undefined), "pending-device");
 });
