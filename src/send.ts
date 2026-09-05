@@ -1,3 +1,4 @@
+import { hostname } from "node:os";
 import type { DeviceConfig, Policy } from "./config.js";
 import { loadConfig, loadPolicy, savePolicy } from "./config.js";
 import type { CaptureEvent } from "./outbox.js";
@@ -28,7 +29,7 @@ export async function sendBatch(
       "Content-Type": "application/json",
       "X-Trinity-Wire-Version": "1",
     },
-    body: JSON.stringify({ items: events }),
+    body: JSON.stringify({ items: events, hostname: hostname() }),
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw new BatchRequestError(res.status);

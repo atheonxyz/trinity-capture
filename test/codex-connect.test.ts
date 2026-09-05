@@ -121,7 +121,7 @@ test("the full connect flow: exchange against a stub server, write pending, prom
   const pluginData = tmpPluginData();
   const cfg: DeviceConfig = { token: "tok-e2e", ingestUrl: "https://api.example/api/v1/ingest/batches", deviceId: "dev-e2e" };
 
-  const exchanged = await withStubServer(cfg, (baseUrl) => exchange(baseUrl, "PAIR-CODE"));
+  const exchanged = await withStubServer(cfg, (baseUrl) => exchange(baseUrl, "PAIR-CODE", null));
   assert.deepEqual(exchanged, cfg);
 
   writePendingConfig(home, exchanged);

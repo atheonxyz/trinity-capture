@@ -107,7 +107,7 @@ test("pairs a codex device, replays the real captured hook stream through the re
 
   // 2. The plugin's own exchange() — real client code shared with every
   // dialect's connect flow, not a raw fetch.
-  const cfg: DeviceConfig = await exchange(baseUrl, code);
+  const cfg: DeviceConfig = await exchange(baseUrl, code, null);
   assert.ok(cfg.token && cfg.deviceId && cfg.ingestUrl);
 
   const dataDir = mkdtempSync(join(tmpdir(), "trinity-e2e-codex-"));

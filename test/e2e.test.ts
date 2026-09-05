@@ -100,8 +100,20 @@ test("pairs a device, replays a session, and reads it back through the dashboard
   const { code } = (await codeRes.json()) as { code: string };
 
   // 2. The plugin's own exchange() — real client code, not a raw fetch.
-  const cfg: DeviceConfig = await exchange(baseUrl, code);
+  const cfg: DeviceConfig = await exchange(baseUrl, code, null);
   assert.ok(cfg.token && cfg.deviceId && cfg.ingestUrl);
+
+  // 2b. Re-pairing the same data dir's saved deviceId reconnects the same
+  // machine instead of minting a second one.
+  const secondCodeRes = await fetch(`${baseUrl}/api/v1/devices/code`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${sessionToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ tool: "claude_code", name: "e2e-smoke-device" }),
+  });
+  if (secondCodeRes.status !== 200) assert.fail(`POST /devices/code: ${secondCodeRes.status} ${await secondCodeRes.text()}`);
+  const { code: secondCode } = (await secondCodeRes.json()) as { code: string };
+  const again: DeviceConfig = await exchange(baseUrl, secondCode, cfg.deviceId);
+  assert.equal(again.deviceId, cfg.deviceId, "a re-pair from the same data dir reconnects the same device");
 
   const dataDir = mkdtempSync(join(tmpdir(), "trinity-e2e-"));
   saveConfig(dataDir, cfg);

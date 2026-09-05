@@ -1,3 +1,4 @@
+import { hostname } from "node:os";
 import { loadConfig, saveConfig } from "./config.js";
 import type { DeviceConfig } from "./config.js";
 import { activationStatus, markPairedAwaitingNewSession } from "./activation.js";
@@ -13,11 +14,18 @@ export function supportsNodeVersion(version: string): boolean {
   return Number.isInteger(major) && major >= MIN_NODE_MAJOR;
 }
 
-export async function exchange(baseUrl: string, code: string): Promise<DeviceConfig> {
+// previousDeviceId is what this data dir already held: it rides the
+// exchange so the server re-tokens that machine instead of minting a
+// second one, and the hostname is what names the machine on the dashboard.
+export async function exchange(baseUrl: string, code: string, previousDeviceId: string | null): Promise<DeviceConfig> {
   const res = await fetch(`${baseUrl}/api/v1/devices/exchange`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ code }),
+    body: JSON.stringify({
+      code,
+      hostname: hostname(),
+      ...(previousDeviceId ? { deviceId: previousDeviceId } : {}),
+    }),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (!res.ok) {
@@ -52,7 +60,7 @@ async function main(): Promise<void> {
   try {
     let cfg: DeviceConfig;
     if (hasPairingCode) {
-      cfg = await exchange(baseUrl, code);
+      cfg = await exchange(baseUrl, code, existingConfig?.deviceId ?? null);
       if (existingConfig && new URL(existingConfig.ingestUrl).origin !== new URL(cfg.ingestUrl).origin) {
         throw new Error("Existing Trinity connection kept. Use a separate plugin connection to test another environment.");
       }

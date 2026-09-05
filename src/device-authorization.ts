@@ -69,11 +69,12 @@ export async function startDeviceAuthorization(baseURL: string, deviceName: stri
 export async function exchangeDeviceAuthorization(
   baseURL: string,
   deviceCode: string,
+  previousDeviceId: string | null,
 ): Promise<DeviceAuthorizationExchange> {
   const response = await fetch(`${baseURL}/api/v1/devices/authorize/exchange`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ deviceCode }),
+    body: JSON.stringify({ deviceCode, ...(previousDeviceId ? { deviceId: previousDeviceId } : {}) }),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
   if (response.status === 202) return { status: "pending" };

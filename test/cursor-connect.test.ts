@@ -15,7 +15,7 @@ function tmpParentDir(): string {
 
 function stubExchange(deviceConfig: DeviceConfig): () => void {
   const original = globalThis.fetch;
-  globalThis.fetch = (async (url: string | URL) => {
+  globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
     const href = String(url);
     if (href.endsWith("/api/v1/devices/exchange")) {
       return new Response(JSON.stringify(deviceConfig), { status: 200 });
@@ -77,7 +77,7 @@ test("browser authorization opens Trinity and waits until approval before saving
   const shownCodes: string[] = [];
   let exchanges = 0;
   const original = globalThis.fetch;
-  globalThis.fetch = (async (url: string | URL) => {
+  globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
     const href = String(url);
     if (href.endsWith("/api/v1/devices/authorize/start")) {
       return Response.json({
@@ -90,6 +90,7 @@ test("browser authorization opens Trinity and waits until approval before saving
     }
     if (href.endsWith("/api/v1/devices/authorize/exchange")) {
       exchanges++;
+      assert.deepEqual(JSON.parse(String(init?.body)), { deviceCode: "device-secret" });
       return exchanges === 1
         ? Response.json({ status: "pending" }, { status: 202 })
         : Response.json({ token: "tok-browser", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev-browser" });

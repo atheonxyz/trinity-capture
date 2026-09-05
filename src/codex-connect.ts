@@ -121,6 +121,21 @@ export function connectionStatus(home: string, key = targetKey(DEFAULT_TARGET)):
   return "unpaired";
 }
 
+// The id this install already holds, wherever Codex left it: the plugin
+// data dir's config when the host handed one over, else the confirmed or
+// pending connection file for this target key.
+export function savedDeviceId(home: string, key: string, pluginDataDir: string | undefined): string | null {
+  const saved = pluginDataDir ? loadConfig(pluginDataDir)?.deviceId : undefined;
+  if (saved) return saved;
+  for (const path of [confirmedConfigPath(home, key), pendingConfigPath(home, key)]) {
+    if (!existsSync(path)) continue;
+    const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+    const id = typeof parsed === "object" && parsed !== null ? Reflect.get(parsed, "deviceId") : undefined;
+    if (typeof id === "string" && id !== "") return id;
+  }
+  return null;
+}
+
 function printDataDirStatus(dataDir: string): boolean {
   const status = activationStatus(dataDir);
   if (status === "unpaired") return false;
@@ -167,7 +182,7 @@ async function main(): Promise<void> {
 
   const baseUrl = process.env.TRINITY_BASE_URL ?? DEFAULT_BASE_URL;
   try {
-    const cfg = await exchange(baseUrl, arg);
+    const cfg = await exchange(baseUrl, arg, savedDeviceId(home, key, pluginDataDir));
     writePendingConfig(home, cfg, key);
     console.log("Trinity pairing recorded. Start a new Codex task in an enabled repository to begin capture.");
   } catch (err) {
