@@ -18,6 +18,7 @@ import { activationStatus } from "../src/activation.js";
 // pnpm test always runs from the repository root.
 const hookBin = join(process.cwd(), "codex", "dist", "codex-hook.js");
 const connectBin = join(process.cwd(), "codex", "dist", "codex-connect.js");
+const setupBin = join(process.cwd(), "codex", "dist", "codex-hook-setup.js");
 const fixturePath = join(process.cwd(), "test", "testdata", "codex_session.jsonl");
 
 async function withPolicyServer<T>(fn: (baseUrl: string) => Promise<T>): Promise<T> {
@@ -79,6 +80,8 @@ function loadFixtureLine(eventName: string): Record<string, unknown> {
 test("the committed hook and connect binaries exist where hooks.json / the skill point", () => {
   assert.ok(existsSync(hookBin), `${hookBin} is missing — run pnpm build:codex and commit the output`);
   assert.ok(existsSync(connectBin), `${connectBin} is missing — run pnpm build:codex and commit the output`);
+  assert.ok(existsSync(setupBin), "the setup skill needs its packaged hook approval helper");
+  execFileSync("node", [setupBin, "--help"], { timeout: 5_000 });
 });
 
 test("the README documents the Node >= 20 prerequisite codex-connect.js itself enforces (docs-truth gate)", () => {
@@ -275,7 +278,7 @@ test("uninstall: hooks.json and the connect skill reference nothing outside the 
   const skillPath = join(process.cwd(), "codex", "skills", "trinity-connect", "SKILL.md");
   const skillRaw = readFileSync(skillPath, "utf8");
   assert.match(skillRaw, /dist\/codex-connect\.js/);
-  assert.match(skillRaw, /codex plugin list --json/);
+  assert.match(skillRaw, /dist\/codex-hook-setup\.js/);
   assert.doesNotMatch(skillRaw, /codex-connect\.js" <pairing-code> trinity-capture@trinity/);
   assert.doesNotMatch(skillRaw, /\/Users\/|\/home\//, "the connect skill must not embed an absolute local path");
 });

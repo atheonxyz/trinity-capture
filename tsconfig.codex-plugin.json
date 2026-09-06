@@ -14,7 +14,9 @@
     "src/outbox.ts",
     "src/observe.ts",
     "src/send.ts",
+    "src/codex-rpc.ts",
     "src/codex-hook.ts",
-    "src/codex-connect.ts"
+    "src/codex-connect.ts",
+    "src/codex-hook-setup.ts"
   ]
 }
