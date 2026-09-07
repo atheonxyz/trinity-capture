@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { execFileSync, type ExecFileSyncOptionsWithStringEncoding } from "node:child_process";
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -16,6 +16,8 @@ const pluginId = "trinity-capture@openai-curated-remote";
 const pluginRoot = realpathSync(join(process.cwd(), "codex"));
 
 type MutableHook = HookMetadata & { trustStatus: HookMetadata["trustStatus"]; enabled: boolean };
+type BooleanHookField = "enabled" | "isManaged" | "async";
+type BadBooleanKind = "missing" | "null" | "string";
 
 class FakeRpc implements CodexHookSetupRpc {
   readonly writes: unknown[] = [];
@@ -274,6 +276,112 @@ test("CLI reports timeout from a hung native app-server", () => {
   );
 });
 
+test("CLI reports native exit code with classified SQLite cause without leaking stderr", () => {
+  const dir = mkdtempSync(join(tmpdir(), "trinity-codex-hook-setup-"));
+  try {
+    const fakeCodex = join(dir, "codex.js");
+    writeFileSync(
+      fakeCodex,
+      `#!${process.execPath}
+process.stderr.write("SQLITE_CANTOPEN: unable to open database file /Users/example/.codex/state.sqlite?token=secret\\n");
+process.exit(1);
+`,
+    );
+    chmodSync(fakeCodex, 0o755);
+
+    const errorText = runCliExpectingFailure(["check", fakeCodex]);
+
+    assert.match(errorText, /native Codex RPC process closed/);
+    assert.match(errorText, /exit code 1/);
+    assert.match(errorText, /SQLite database open\/permission failure/);
+    assert.doesNotMatch(errorText, /\/Users\/example/);
+    assert.doesNotMatch(errorText, /secret/);
+    assert.doesNotMatch(errorText, /token/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI classifies SQLite stderr split across chunks without leaking stderr", () => {
+  const dir = mkdtempSync(join(tmpdir(), "trinity-codex-hook-setup-"));
+  try {
+    const fakeCodex = join(dir, "codex.js");
+    writeFileSync(
+      fakeCodex,
+      `#!${process.execPath}
+process.stderr.write("SQL");
+setTimeout(() => {
+  process.stderr.write("ITE_CANTOPEN: secret-token-value\\n");
+  process.exit(1);
+}, 20);
+`,
+    );
+    chmodSync(fakeCodex, 0o755);
+
+    const errorText = runCliExpectingFailure(["check", fakeCodex]);
+
+    assert.match(errorText, /exit code 1/);
+    assert.match(errorText, /SQLite database open\/permission failure/);
+    assert.doesNotMatch(errorText, /secret-token-value/);
+    assert.doesNotMatch(errorText, /SQLITE_CANTOPEN/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI reports native signal when the app-server exits by signal without stderr", () => {
+  const dir = mkdtempSync(join(tmpdir(), "trinity-codex-hook-setup-"));
+  try {
+    const fakeCodex = join(dir, "codex.js");
+    writeFileSync(fakeCodex, `#!${process.execPath}\nprocess.kill(process.pid, "SIGTERM");\n`);
+    chmodSync(fakeCodex, 0o755);
+
+    const errorText = runCliExpectingFailure(["check", fakeCodex]);
+
+    assert.match(errorText, /native Codex RPC process closed/);
+    assert.match(errorText, /signal SIGTERM/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI reports malformed boolean fields by field name and received type", () => {
+  const cases: readonly [BooleanHookField, BadBooleanKind, RegExp][] = [
+    ["enabled", "string", /expected boolean for enabled; received string/],
+    ["isManaged", "missing", /expected boolean for isManaged; received missing/],
+    ["async", "null", /expected boolean for async; received null/],
+  ];
+
+  for (const [fieldName, receivedKind, expected] of cases) {
+    const dir = mkdtempSync(join(tmpdir(), "trinity-codex-hook-setup-"));
+    try {
+      const statePath = join(dir, "state.json");
+      const fakeCodex = join(dir, "codex.js");
+      const cliRoot = realpathSync(join(process.cwd(), "dist-test"));
+      mkdirSync(join(cliRoot, "hooks"), { recursive: true });
+      writeFileSync(join(cliRoot, "hooks", "hooks.json"), "{}");
+      const [hook] = trinityHooksForRoot(cliRoot);
+      assert.ok(hook);
+      writeFileSync(
+        statePath,
+        JSON.stringify({
+          hooks: [hookWithBadBoolean(hook, fieldName, receivedKind)],
+          writes: [],
+        }),
+      );
+      writeFileSync(fakeCodex, `#!${process.execPath}\n${fakeAppServerSource(statePath)}`);
+      chmodSync(fakeCodex, 0o755);
+
+      const errorText = runCliExpectingFailure(["check", fakeCodex]);
+
+      assert.match(errorText, expected);
+      assert.doesNotMatch(errorText, /not-a-boolean/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
 test("CLI --help exits without opening native RPC", () => {
   assert.doesNotThrow(() =>
     execFileSync(process.execPath, ["dist-test/src/codex-hook-setup.js", "--help", "/missing/codex"], {
@@ -295,6 +403,31 @@ test("CLI approve without fingerprint fails before opening native RPC", () => {
     /Usage:/,
   );
 });
+
+function runCliExpectingFailure(args: readonly string[]): string {
+  const options: ExecFileSyncOptionsWithStringEncoding = {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  };
+  try {
+    execFileSync(process.execPath, ["dist-test/src/codex-hook-setup.js", ...args], options);
+  } catch (error) {
+    if (error instanceof Error && "stderr" in error && typeof error.stderr === "string") return error.stderr;
+    throw error;
+  }
+  throw new Error("expected CLI command to fail");
+}
+
+function hookWithBadBoolean(hook: HookMetadata, fieldName: BooleanHookField, receivedKind: BadBooleanKind): Record<string, unknown> {
+  const data = Object.fromEntries(Object.entries(hook));
+  if (receivedKind === "missing") {
+    delete data[fieldName];
+    return data;
+  }
+  data[fieldName] = receivedKind === "null" ? null : "not-a-boolean";
+  return data;
+}
 
 function fakeAppServerSource(statePathValue: string): string {
   return `

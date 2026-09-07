@@ -8,7 +8,16 @@ Connect this Codex installation using the user's short-lived pairing code.
 1. Resolve `<pluginRoot>` from this installed skill at
    `<pluginRoot>/skills/trinity-connect/SKILL.md`. Use the Codex executable for
    this host from PATH or the running app's resources.
-2. Run `node "<pluginRoot>/dist/codex-hook-setup.js" check <codex-executable>`.
+2. Before starting the helper, use the host's permission flow to obtain any needed
+   approval for this exact setup command to run with write access to `CODEX_HOME`.
+   The helper's check does not approve hooks or submit a pairing code, but the
+   native Codex process initializes its own SQLite state there. A workspace-only
+   sandbox may deny that initialization. Use approved access outside that sandbox
+   when needed, preserving the same host and `CODEX_HOME`; never switch homes,
+   change global permission rules, bypass approval, or retry after a denial without
+   the required user approval. Keep this approved execution context for the helper
+   and pairing commands.
+   Run `node "<pluginRoot>/dist/codex-hook-setup.js" check <codex-executable>`.
    It identifies this installed plugin and reports its capture-hook readiness.
    Stop on a missing, disabled, policy-blocked, or unsupported hook configuration.
 3. If the result is `approval_required`, show the returned hook definitions and

@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
 const RPC_TIMEOUT_MS = 8_000;
 const MAX_OUTPUT_BYTES = 1024 * 1024;
+const STDERR_CLASSIFICATION_TAIL_BYTES = 4 * 1024;
 export class NativeCodexRpc {
     nextId = 1;
     child;
@@ -9,6 +10,8 @@ export class NativeCodexRpc {
     pending = new Map();
     buffer = "";
     outputBytes = 0;
+    stderrTail = "";
+    stderrCause = null;
     constructor(child, sourcePath) {
         this.child = child;
         this.sourcePath = sourcePath;
@@ -17,19 +20,20 @@ export class NativeCodexRpc {
         child.stderr.setEncoding("utf8");
         child.stderr.on("data", (chunk) => {
             this.outputBytes += Buffer.byteLength(chunk);
+            this.trackNativeStderr(chunk);
             if (this.outputBytes > MAX_OUTPUT_BYTES)
                 this.close();
         });
         child.stdin.on("error", (error) => this.rejectPending(`native Codex RPC input error: ${error.message}`));
         child.on("error", (error) => this.rejectPending(`native Codex RPC process error: ${error.message}`));
-        child.on("close", () => this.rejectPending("native Codex RPC process closed"));
+        child.on("close", (code, signal) => this.rejectPending(formatNativeCloseMessage(code, signal, this.stderrCause)));
     }
     static async create(codexPath, sourcePath) {
         const child = spawn(codexPath, ["app-server", "--stdio"], { stdio: ["pipe", "pipe", "pipe"] });
         const rpc = new NativeCodexRpc(child, sourcePath);
         try {
             await rpc.request("initialize", {
-                clientInfo: { name: "trinity-capture", title: null, version: "0.3.9" },
+                clientInfo: { name: "trinity-capture", title: null, version: "0.3.10" },
                 capabilities: { experimentalApi: true, requestAttestation: false },
             });
             rpc.notify("initialized");
@@ -85,6 +89,13 @@ export class NativeCodexRpc {
         for (const resolve of this.pending.values())
             resolve({ id: -1, error: { message } });
         this.pending.clear();
+    }
+    trackNativeStderr(chunk) {
+        if (this.stderrCause !== null)
+            return;
+        const sample = this.stderrTail + chunk;
+        this.stderrCause = classifyNativeStderr(sample);
+        this.stderrTail = this.stderrCause === null ? lastUtf8Bytes(sample, STDERR_CLASSIFICATION_TAIL_BYTES) : "";
     }
     handleData(chunk) {
         try {
@@ -157,13 +168,13 @@ function parseHookMetadata(value) {
         sourcePath: readString(object.sourcePath),
         source: readString(object.source),
         pluginId: object.pluginId === null ? null : readString(object.pluginId),
-        enabled: readBoolean(object.enabled),
-        isManaged: readBoolean(object.isManaged),
+        enabled: readBoolean(object.enabled, "enabled"),
+        isManaged: readBoolean(object.isManaged, "isManaged"),
         currentHash: readString(object.currentHash),
         trustStatus: readHookTrustStatus(object.trustStatus),
         handlerType: "command",
         command: readString(object.command),
-        async: readBoolean(object.async),
+        async: readBoolean(object.async, "async"),
     };
 }
 function readObject(value) {
@@ -181,10 +192,10 @@ function readString(value) {
         return value;
     throw new Error("expected string");
 }
-function readBoolean(value) {
+function readBoolean(value, fieldName) {
     if (typeof value === "boolean")
         return value;
-    throw new Error("expected boolean");
+    throw new Error(`expected boolean for ${fieldName}; received ${receivedType(value)}`);
 }
 function readHookEventName(value) {
     if (value === "sessionStart" || value === "userPromptSubmit" || value === "preToolUse" || value === "postToolUse" || value === "stop" || value === "sessionEnd")
@@ -195,4 +206,47 @@ function readHookTrustStatus(value) {
     if (value === "managed" || value === "untrusted" || value === "trusted" || value === "modified")
         return value;
     throw new Error("unexpected hook trust status");
+}
+function receivedType(value) {
+    if (value === undefined)
+        return "missing";
+    if (value === null)
+        return "null";
+    if (Array.isArray(value))
+        return "array";
+    return typeof value;
+}
+function classifyNativeStderr(chunk) {
+    const lower = chunk.toLowerCase();
+    const mentionsSqlite = lower.includes("sqlite") || lower.includes("database file");
+    if (!mentionsSqlite)
+        return null;
+    if (lower.includes("readonly") || lower.includes("read-only"))
+        return "sqlite-read-only";
+    if (lower.includes("cantopen") ||
+        lower.includes("unable to open") ||
+        lower.includes("permission denied") ||
+        lower.includes("eacces") ||
+        lower.includes("eperm")) {
+        return "sqlite-open-permission";
+    }
+    return null;
+}
+function lastUtf8Bytes(value, maxBytes) {
+    const buffer = Buffer.from(value);
+    if (buffer.length <= maxBytes)
+        return value;
+    return buffer.subarray(buffer.length - maxBytes).toString("utf8");
+}
+function formatNativeCloseMessage(code, signal, cause) {
+    const facts = [];
+    if (code !== null)
+        facts.push(`exit code ${code}`);
+    if (signal !== null)
+        facts.push(`signal ${signal}`);
+    if (cause === "sqlite-open-permission")
+        facts.push("SQLite database open/permission failure");
+    if (cause === "sqlite-read-only")
+        facts.push("SQLite database read-only failure");
+    return facts.length === 0 ? "native Codex RPC process closed" : `native Codex RPC process closed (${facts.join("; ")})`;
 }

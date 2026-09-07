@@ -4,8 +4,11 @@ import type { CodexHookSetupRpc, ConfigBatchWriteParams, HookMetadata, HooksSnap
 
 const RPC_TIMEOUT_MS = 8_000;
 const MAX_OUTPUT_BYTES = 1024 * 1024;
+const STDERR_CLASSIFICATION_TAIL_BYTES = 4 * 1024;
 
 type RpcResponse = { readonly id: number; readonly result?: unknown; readonly error?: { readonly message: string } };
+type NativeExitCause = "sqlite-open-permission" | "sqlite-read-only";
+type HookBooleanField = "enabled" | "isManaged" | "async";
 
 export class NativeCodexRpc implements CodexHookSetupRpc {
   private nextId = 1;
@@ -14,6 +17,8 @@ export class NativeCodexRpc implements CodexHookSetupRpc {
   private readonly pending = new Map<number, (message: RpcResponse) => void>();
   private buffer = "";
   private outputBytes = 0;
+  private stderrTail = "";
+  private stderrCause: NativeExitCause | null = null;
 
   private constructor(child: ChildProcessWithoutNullStreams, sourcePath: string) {
     this.child = child;
@@ -23,11 +28,12 @@ export class NativeCodexRpc implements CodexHookSetupRpc {
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk: string) => {
       this.outputBytes += Buffer.byteLength(chunk);
+      this.trackNativeStderr(chunk);
       if (this.outputBytes > MAX_OUTPUT_BYTES) this.close();
     });
     child.stdin.on("error", (error) => this.rejectPending(`native Codex RPC input error: ${error.message}`));
     child.on("error", (error) => this.rejectPending(`native Codex RPC process error: ${error.message}`));
-    child.on("close", () => this.rejectPending("native Codex RPC process closed"));
+    child.on("close", (code, signal) => this.rejectPending(formatNativeCloseMessage(code, signal, this.stderrCause)));
   }
 
   static async create(codexPath: string, sourcePath: string): Promise<NativeCodexRpc> {
@@ -35,7 +41,7 @@ export class NativeCodexRpc implements CodexHookSetupRpc {
     const rpc = new NativeCodexRpc(child, sourcePath);
     try {
       await rpc.request("initialize", {
-        clientInfo: { name: "trinity-capture", title: null, version: "0.3.9" },
+        clientInfo: { name: "trinity-capture", title: null, version: "0.3.10" },
         capabilities: { experimentalApi: true, requestAttestation: false },
       });
       rpc.notify("initialized");
@@ -92,6 +98,13 @@ export class NativeCodexRpc implements CodexHookSetupRpc {
   private rejectPending(message: string): void {
     for (const resolve of this.pending.values()) resolve({ id: -1, error: { message } });
     this.pending.clear();
+  }
+
+  private trackNativeStderr(chunk: string): void {
+    if (this.stderrCause !== null) return;
+    const sample = this.stderrTail + chunk;
+    this.stderrCause = classifyNativeStderr(sample);
+    this.stderrTail = this.stderrCause === null ? lastUtf8Bytes(sample, STDERR_CLASSIFICATION_TAIL_BYTES) : "";
   }
 
   private handleData(chunk: string): void {
@@ -160,13 +173,13 @@ function parseHookMetadata(value: unknown): HookMetadata {
     sourcePath: readString(object.sourcePath),
     source: readString(object.source),
     pluginId: object.pluginId === null ? null : readString(object.pluginId),
-    enabled: readBoolean(object.enabled),
-    isManaged: readBoolean(object.isManaged),
+    enabled: readBoolean(object.enabled, "enabled"),
+    isManaged: readBoolean(object.isManaged, "isManaged"),
     currentHash: readString(object.currentHash),
     trustStatus: readHookTrustStatus(object.trustStatus),
     handlerType: "command",
     command: readString(object.command),
-    async: readBoolean(object.async),
+    async: readBoolean(object.async, "async"),
   };
 }
 
@@ -185,9 +198,9 @@ function readString(value: unknown): string {
   throw new Error("expected string");
 }
 
-function readBoolean(value: unknown): boolean {
+function readBoolean(value: unknown, fieldName: HookBooleanField): boolean {
   if (typeof value === "boolean") return value;
-  throw new Error("expected boolean");
+  throw new Error(`expected boolean for ${fieldName}; received ${receivedType(value)}`);
 }
 
 function readHookEventName(value: unknown): HookMetadata["eventName"] {
@@ -200,3 +213,41 @@ function readHookTrustStatus(value: unknown): HookMetadata["trustStatus"] {
   throw new Error("unexpected hook trust status");
 }
 
+function receivedType(value: unknown): string {
+  if (value === undefined) return "missing";
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  return typeof value;
+}
+
+function classifyNativeStderr(chunk: string): NativeExitCause | null {
+  const lower = chunk.toLowerCase();
+  const mentionsSqlite = lower.includes("sqlite") || lower.includes("database file");
+  if (!mentionsSqlite) return null;
+  if (lower.includes("readonly") || lower.includes("read-only")) return "sqlite-read-only";
+  if (
+    lower.includes("cantopen") ||
+    lower.includes("unable to open") ||
+    lower.includes("permission denied") ||
+    lower.includes("eacces") ||
+    lower.includes("eperm")
+  ) {
+    return "sqlite-open-permission";
+  }
+  return null;
+}
+
+function lastUtf8Bytes(value: string, maxBytes: number): string {
+  const buffer = Buffer.from(value);
+  if (buffer.length <= maxBytes) return value;
+  return buffer.subarray(buffer.length - maxBytes).toString("utf8");
+}
+
+function formatNativeCloseMessage(code: number | null, signal: NodeJS.Signals | null, cause: NativeExitCause | null): string {
+  const facts: string[] = [];
+  if (code !== null) facts.push(`exit code ${code}`);
+  if (signal !== null) facts.push(`signal ${signal}`);
+  if (cause === "sqlite-open-permission") facts.push("SQLite database open/permission failure");
+  if (cause === "sqlite-read-only") facts.push("SQLite database read-only failure");
+  return facts.length === 0 ? "native Codex RPC process closed" : `native Codex RPC process closed (${facts.join("; ")})`;
+}

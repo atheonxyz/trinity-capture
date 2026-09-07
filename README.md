@@ -43,7 +43,9 @@ Cursor waits for the browser approval, stores its credential in the operating sy
 Install [Trinity](https://chatgpt.com/plugins/plugins_6a8fe5b3cef48191bf833140a688aa76)
 in the Codex App, or use `/plugins` in Codex CLI. Generate a Codex setup prompt
 in Trinity and paste it into Codex. Setup checks the installed capture hooks,
-asks for approval if needed, and saves the pairing. You can also run
+asks for approval if needed, and saves the pairing. The native Codex process needs
+write access to its own state directory even for the hook check; setup requests
+approved execution access if the workspace sandbox blocks that initialization. You can also run
 `$trinity-connect <code>` for an installed plugin.
 
 Approve the specific Trinity capture hooks when setup asks. Existing approvals
