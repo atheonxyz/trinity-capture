@@ -57,7 +57,7 @@ function loadFixtureLines(): Record<string, unknown>[] {
 // Every call goes through the real dialect table + the shared engine, the
 // same way the CLI bootstrap does — just with an in-memory env instead of
 // argv/stdin.
-function runCodexHook(payload: Record<string, unknown>, dataDir: string): Promise<void> {
+function runCodexHook(payload: Record<string, unknown>, dataDir: string): Promise<string | undefined> {
   const eventName = payload.hook_event_name as string;
   return runHook(codexDialect, eventName, JSON.stringify(payload), { ...process.env, PLUGIN_DATA: dataDir });
 }

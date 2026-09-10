@@ -69,6 +69,10 @@ async function fixture(t: TestContext) {
   };
 }
 
+// A captured session asks for its task context once before it drains, so a
+// session that captures makes exactly these two requests, in this order.
+const captured = ["/api/v1/ingest/session-context", "/api/v1/ingest/batches"];
+
 for (const prompt of ["[Trinity setup]\nSETUP_SECRET", "/trinity:connect SETUP_SECRET"]) {
   for (const [source, paired] of [
     ["inline", "cli"],
@@ -100,7 +104,7 @@ test("a new session still captures after another surface paired during setup", a
 
   await f.run(f.dirs.inline, "UserPromptSubmit", { session_id: "work", prompt: "ordinary work" });
 
-  assert.deepEqual(f.requests, ["/api/v1/ingest/batches"]);
+  assert.deepEqual(f.requests, captured);
   assert.equal(outboxFiles(f.dirs.cli).length, 1);
   assert.deepEqual(outboxFiles(f.dirs.inline), []);
 });
@@ -125,7 +129,7 @@ test("another plugin's marker does not suppress Claude capture", async (t) => {
 
   await f.run(f.dirs.inline, "UserPromptSubmit", { prompt: "ordinary work" });
 
-  assert.deepEqual(f.requests, ["/api/v1/ingest/batches"]);
+  assert.deepEqual(f.requests, captured);
   assert.equal(outboxFiles(f.dirs.cli).length, 1);
 });
 
@@ -136,7 +140,7 @@ test("a prefixed non-directory does not suppress Claude capture", async (t) => {
 
   await f.run(f.dirs.cli, "UserPromptSubmit", { prompt: "ordinary work" });
 
-  assert.deepEqual(f.requests, ["/api/v1/ingest/batches"]);
+  assert.deepEqual(f.requests, captured);
   assert.equal(outboxFiles(f.dirs.cli).length, 1);
 });
 
@@ -148,7 +152,7 @@ test("a non-directory current path does not suppress Claude capture", async (t) 
 
   await f.run(broken, "UserPromptSubmit", { prompt: "ordinary work" });
 
-  assert.deepEqual(f.requests, ["/api/v1/ingest/batches"]);
+  assert.deepEqual(f.requests, captured);
   assert.equal(outboxFiles(f.dirs.cli).length, 1);
 });
 
@@ -160,7 +164,7 @@ test("a differently paired Claude sibling does not suppress capture", async (t) 
 
   await f.run(f.dirs.cli, "UserPromptSubmit", { prompt: "ordinary work" });
 
-  assert.deepEqual(f.requests, ["/api/v1/ingest/batches"]);
+  assert.deepEqual(f.requests, captured);
   assert.equal(outboxFiles(f.dirs.cli).length, 1);
   assert.deepEqual(outboxFiles(f.dirs.inline), []);
 });
@@ -175,7 +179,7 @@ test("a stale unpaired Claude sibling does not suppress capture", async (t) => {
 
   await f.run(f.dirs.cli, "UserPromptSubmit", { prompt: "ordinary work" });
 
-  assert.deepEqual(f.requests, ["/api/v1/ingest/batches"]);
+  assert.deepEqual(f.requests, captured);
   assert.equal(outboxFiles(f.dirs.cli).length, 1);
   assert.deepEqual(outboxFiles(f.dirs.inline), []);
 });
@@ -190,7 +194,7 @@ test("a future-dated unpaired Claude sibling does not suppress capture", async (
 
   await f.run(f.dirs.cli, "UserPromptSubmit", { prompt: "ordinary work" });
 
-  assert.deepEqual(f.requests, ["/api/v1/ingest/batches"]);
+  assert.deepEqual(f.requests, captured);
   assert.equal(outboxFiles(f.dirs.cli).length, 1);
   assert.deepEqual(outboxFiles(f.dirs.inline), []);
 });

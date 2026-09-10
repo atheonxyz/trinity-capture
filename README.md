@@ -67,6 +67,7 @@ For a matching repository, Trinity receives:
 - The coding tool, model, branch, HEAD commit, dirty state, and bounded diff statistics.
 - Tool names and call identifiers, never tool arguments or results.
 - Session lifecycle timestamps and completion reasons.
+- In Claude Code, once per session, the tasks the session likely relates to: a read-only request carrying the repository, branch, and first prompt, answered with task keys and titles the agent sees as context.
 
 Trinity does not receive unmatched repository identities, absolute paths, environment variables, tool bodies, reasoning text, or Cursor's `user_email` field. See [PRIVACY.md](PRIVACY.md) for the complete disclosure.
 

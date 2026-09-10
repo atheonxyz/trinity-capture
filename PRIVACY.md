@@ -15,6 +15,7 @@ For repositories enabled in Trinity, the plugin may send:
 - Repository-relative working directory, branch, HEAD commit, dirty state, bounded diff statistics, and changed file names.
 - Tool names and call identifiers.
 - Session lifecycle and completion metadata.
+- Once per session in Claude Code, a read-only request for the tasks the session likely relates to, carrying the repository, the branch, and the first prompt, all of which the list above already covers. The answer, task keys and titles from your Trinity workspace, is shown to the coding agent as context and stored nowhere.
 
 ## Data not sent
 

@@ -36,6 +36,10 @@ pnpm build:plugin-cursor   # regenerate cursor/dist/
   stream also carries `user_email`, which is never forwarded). Use an allowlist per
   event, never a strip list.
 - Store an event in the local outbox before attempting network I/O.
+- The session-context pull (`fetchSessionContext`) is the one read a hook makes: once per
+  session, bounded by the hook budget, sending nothing the capture allowlist does not already
+  forward, never blocking or reordering capture, and only for a dialect with a `contextOutput`
+  door (Claude Code today).
 - Unmatched repositories never send session events.
 - Every product's `dist/` is committed. Regenerate the relevant one after changing
   `src/`, and keep the generated diff in the same commit; CI diffs all three.

@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Dialect } from "./hook-core.js";
@@ -181,13 +181,18 @@ export const claudeCodeDialect: Dialect = {
   // declared "async": true — so drains are budgeted inline, like codex's.
   drainInline: true,
   dataDir: resolveDataDir,
+  // SessionStart and UserPromptSubmit hooks hand Claude extra context through
+  // this JSON on stdout; the same shape names the event it answers.
+  contextOutput: (event, context) => JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: context } }),
 };
 
 async function cli(): Promise<void> {
   const eventName = process.argv[2];
   if (!eventName) return;
   const stdin = readFileSync(0, "utf8");
-  await runHook(claudeCodeDialect, eventName, stdin, process.env);
+  const output = await runHook(claudeCodeDialect, eventName, stdin, process.env);
+  // Synchronous, because the exit below would not wait for a pipe to flush.
+  if (output !== undefined) writeSync(1, `${output}\n`);
 }
 
 if (isMainModule(import.meta.url)) {
