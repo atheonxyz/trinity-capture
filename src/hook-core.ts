@@ -175,9 +175,11 @@ function resolveTurnKey(dataDir: string, dialect: Dialect, event: string, sessio
   }
 }
 
-// The session-context pull: once per session, read-only, bounded by the hook
-// budget, and never in the way of capture. SessionStart asks with the branch;
-// when that names nothing, the first prompt asks once more with the prompt.
+// The session-context pull: read-only, bounded by the hook budget, and never
+// in the way of capture. SessionStart asks with the branch; when that names
+// nothing, the first prompt asks once more with the prompt; and a prompt on a
+// branch the session has not asked about yet asks again, so switching work
+// mid-session refreshes the context without anyone asking for it.
 const SESSION_CONTEXT_BUDGET_MS = 1_200;
 const SESSION_CONTEXT_FLOOR_MS = 200;
 const SESSION_CONTEXT_MAX_LISTED = 3;
@@ -239,11 +241,11 @@ async function pullSessionContext(
   let prompt: string | undefined;
   if (dialect.isPromptSubmit(event)) {
     const state = readSessionContextState(file);
-    if (state?.settled) return undefined;
+    branch = currentBranch(cwd) ?? "";
+    if (state?.settled && state.branch === branch) return undefined;
     const value = payload.prompt;
     if (typeof value !== "string" || value.trim() === "") return undefined;
     prompt = value;
-    branch = state?.branch ?? currentBranch(cwd) ?? "";
   } else if (!dialect.isSessionStart(event)) {
     return undefined;
   }

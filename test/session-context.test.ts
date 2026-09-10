@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { saveConfig, savePolicy } from "../src/config.js";
@@ -101,6 +102,33 @@ test("when the branch names nothing, the first prompt asks once more and later p
     const second = await run("UserPromptSubmit", { session_id: "s1", cwd: repo, prompt_id: "p2", prompt: "now the tests" }, dataDir);
     assert.equal(second, undefined);
     assert.equal(asked.length, 2, "one prompt-time pull per session, whatever it answered");
+  } finally {
+    restore();
+  }
+});
+
+test("a branch switched mid-session asks again for the new branch, once", async () => {
+  const dataDir = pairedDataDir();
+  const repo = initRepo("git@github.com:acme/widgets.git");
+  const asked: Record<string, unknown>[] = [];
+  const restore = stubFetch({
+    onSessionContext: (body) => {
+      asked.push(body);
+      return Response.json({ route: "project", projectId: "p1", candidates: [timeouts] });
+    },
+  });
+  try {
+    parseOutput(await run("SessionStart", { ...sessionStartInput, cwd: repo }, dataDir));
+    assert.equal(await run("UserPromptSubmit", { session_id: "s1", cwd: repo, prompt_id: "p1", prompt: "start" }, dataDir), undefined);
+
+    execFileSync("git", ["checkout", "-q", "-b", "fix/issue-43"], { cwd: repo });
+    const switched = await run("UserPromptSubmit", { session_id: "s1", cwd: repo, prompt_id: "p2", prompt: "now the other one" }, dataDir);
+    assert.equal(parseOutput(switched).hookSpecificOutput.hookEventName, "UserPromptSubmit");
+    assert.equal(await run("UserPromptSubmit", { session_id: "s1", cwd: repo, prompt_id: "p3", prompt: "and on" }, dataDir), undefined);
+    assert.deepEqual(asked, [
+      { repo: "github.com/acme/widgets", branch: "main" },
+      { repo: "github.com/acme/widgets", branch: "fix/issue-43", prompt: "now the other one" },
+    ]);
   } finally {
     restore();
   }

@@ -38,6 +38,8 @@ Cursor waits for the browser approval, stores its credential in the operating sy
 3. Generate a Claude Code pairing code from Trinity, then run `/trinity:connect <code>`.
 4. Exit Claude Code and start a new session in an enabled repository.
 
+In an enabled repository, a session opens with one line naming the Trinity task the branch most likely belongs to, refreshed when you switch branches. `/trinity:task [what you are working on]` asks at any point.
+
 ### Codex
 
 Install [Trinity](https://chatgpt.com/plugins/plugins_6a8fe5b3cef48191bf833140a688aa76)

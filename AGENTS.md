@@ -39,7 +39,9 @@ pnpm build:plugin-cursor   # regenerate cursor/dist/
 - The session-context pull (`fetchSessionContext`) is the one read a hook makes: once per
   session, bounded by the hook budget, sending nothing the capture allowlist does not already
   forward, never blocking or reordering capture, and only for a dialect with a `contextOutput`
-  door (Claude Code today).
+  door (Claude Code today). It runs at SessionStart, once more on the first prompt when the
+  branch named nothing, again when a prompt arrives on a branch the session has not asked
+  about, and on demand through `/trinity:task` (`src/session-context.ts`).
 - Unmatched repositories never send session events.
 - Every product's `dist/` is committed. Regenerate the relevant one after changing
   `src/`, and keep the generated diff in the same commit; CI diffs all three.
