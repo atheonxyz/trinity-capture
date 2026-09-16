@@ -115,6 +115,7 @@ test("check rejects foreign plugin, command, source, source path, disabled, and 
     ["source", { source: "user" }, /source/],
     ["sourcePath", { sourcePath: realpathSync(process.cwd()) }, /Expected 6/],
     ["disabled", { enabled: false }, /disabled/],
+    ["async", { async: true }, /unexpectedly async/],
     ["managed", { isManaged: true }, /managed/],
   ];
 
@@ -214,50 +215,54 @@ test("approve reports blocked when the native config write fails", async () => {
   assert.match(result.reason, /write failed/);
 });
 
-test("CLI check uses the fake app-server process and never writes", () => {
-  const dir = mkdtempSync(join(tmpdir(), "trinity-codex-hook-setup-"));
-  const statePath = join(dir, "state.json");
-  const fakeCodex = join(dir, "codex.js");
-  const cliRoot = realpathSync(join(process.cwd(), "dist-test"));
-  mkdirSync(join(cliRoot, "hooks"), { recursive: true });
-  writeFileSync(join(cliRoot, "hooks", "hooks.json"), "{}");
-  writeFileSync(
-    statePath,
-    JSON.stringify({
-      hooks: [
-        ...trinityHooksForRoot(cliRoot, { trustStatus: "untrusted" }),
-        {
-          key: "omo@sisyphuslabs:hooks/post-compact.json:post_compact:0:0",
-          eventName: "postCompact",
-          handlerType: "prompt",
-          matcher: null,
-                            sourcePath: process.cwd(),
-          source: "plugin",
-          pluginId: "omo@sisyphuslabs",
-          displayOrder: 99,
-          enabled: true,
-          isManaged: false,
-          currentHash: "sha256:unrelated",
-          trustStatus: "trusted",
-        },
-      ],
-      writes: [],
-    }),
-  );
-  writeFileSync(fakeCodex, `#!${process.execPath}\n${fakeAppServerSource(statePath)}`);
-  chmodSync(fakeCodex, 0o755);
+for (const includeAsync of [true, false]) {
+  test(`CLI check ${includeAsync ? "with" : "without"} async metadata requires approval and never writes`, () => {
+    const dir = mkdtempSync(join(tmpdir(), "trinity-codex-hook-setup-"));
+    const statePath = join(dir, "state.json");
+    const fakeCodex = join(dir, "codex.js");
+    const cliRoot = realpathSync(join(process.cwd(), "dist-test"));
+    mkdirSync(join(cliRoot, "hooks"), { recursive: true });
+    writeFileSync(join(cliRoot, "hooks", "hooks.json"), "{}");
+    writeFileSync(
+      statePath,
+      JSON.stringify({
+        hooks: [
+          ...trinityHooksForRoot(cliRoot, { trustStatus: "untrusted" }).map((hook) =>
+            includeAsync ? hook : hookWithBadBoolean(hook, "async", "missing")),
+          {
+            key: "omo@sisyphuslabs:hooks/post-compact.json:post_compact:0:0",
+            eventName: "postCompact",
+            handlerType: "prompt",
+            matcher: null,
+            sourcePath: process.cwd(),
+            source: "plugin",
+            pluginId: "omo@sisyphuslabs",
+            displayOrder: 99,
+            enabled: true,
+            isManaged: false,
+            currentHash: "sha256:unrelated",
+            trustStatus: "trusted",
+          },
+        ],
+        writes: [],
+      }),
+    );
+    writeFileSync(fakeCodex, `#!${process.execPath}\n${fakeAppServerSource(statePath)}`);
+    chmodSync(fakeCodex, 0o755);
 
-  const output = execFileSync(process.execPath, ["dist-test/src/codex-hook-setup.js", "check", fakeCodex], {
-    cwd: process.cwd(),
-    encoding: "utf8",
+    const output = execFileSync(process.execPath, ["dist-test/src/codex-hook-setup.js", "check", fakeCodex], {
+      cwd: process.cwd(),
+      encoding: "utf8",
+    });
+    const result = JSON.parse(output) as { readonly status: string; readonly fingerprint: string };
+    const state = JSON.parse(execFileSync(process.execPath, ["-e", `process.stdout.write(require(${JSON.stringify(statePath)}).writes.length.toString())`], { encoding: "utf8" }));
+
+    assert.equal(result.status, "approval_required");
+    assert.match(result.fingerprint, /^[a-f0-9]{64}$/);
+    assert.equal(state, 0);
   });
-  const result = JSON.parse(output) as { readonly status: string; readonly fingerprint: string };
-  const state = JSON.parse(execFileSync(process.execPath, ["-e", `process.stdout.write(require(${JSON.stringify(statePath)}).writes.length.toString())`], { encoding: "utf8" }));
 
-  assert.equal(result.status, "approval_required");
-  assert.match(result.fingerprint, /^[a-f0-9]{64}$/);
-  assert.equal(state, 0);
-});
+}
 
 test("CLI reports timeout from a hung native app-server", () => {
   const dir = mkdtempSync(join(tmpdir(), "trinity-codex-hook-setup-"));
@@ -350,6 +355,7 @@ test("CLI reports malformed boolean fields by field name and received type", () 
     ["enabled", "string", /expected boolean for enabled; received string/],
     ["isManaged", "missing", /expected boolean for isManaged; received missing/],
     ["async", "null", /expected boolean for async; received null/],
+    ["async", "string", /expected boolean for async; received string/],
   ];
 
   for (const [fieldName, receivedKind, expected] of cases) {
