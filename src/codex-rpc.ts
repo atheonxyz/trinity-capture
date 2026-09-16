@@ -179,7 +179,9 @@ function parseHookMetadata(value: unknown): HookMetadata {
     trustStatus: readHookTrustStatus(object.trustStatus),
     handlerType: "command",
     command: readString(object.command),
-    async: readBoolean(object.async, "async"),
+    // Native hooks/list versions may omit async from command metadata.
+    // Validate it strictly when present; omission does not assert a value.
+    ...(object.async === undefined ? {} : { async: readBoolean(object.async, "async") }),
   };
 }
 

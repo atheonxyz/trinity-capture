@@ -22,7 +22,7 @@ export type HookMetadata = {
   readonly isManaged: boolean;
   readonly currentHash: string;
   readonly trustStatus: HookTrustStatus;
-} & ({ readonly handlerType: "command"; readonly command: string; readonly async: boolean } | { readonly handlerType: "mcpTool" | "prompt" | "agent" });
+} & ({ readonly handlerType: "command"; readonly command: string; readonly async?: boolean } | { readonly handlerType: "mcpTool" | "prompt" | "agent" });
 
 export type HooksSnapshot = {
   readonly hooks: readonly HookMetadata[];
