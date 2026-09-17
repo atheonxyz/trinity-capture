@@ -189,6 +189,8 @@ const SESSION_CONTEXT_FLOOR_MS = 200;
 const SESSION_CONTEXT_MAX_LISTED = 3;
 const SESSION_CONTEXT_TITLE_RUNES = 80;
 const SESSION_CONTEXT_FACT_RUNES = 80;
+const SESSION_CONTEXT_CANDIDATE_RUNES = 190;
+const SESSION_CONTEXT_DETAIL_RUNES = 260;
 
 interface SessionContextState {
   branch: string;
@@ -217,7 +219,11 @@ function writeSessionContextState(file: string, state: SessionContextState): voi
 export function renderSessionContext(candidates: readonly SessionContextCandidate[]): string | null {
   const oneLine = (value: string, maxRunes = SESSION_CONTEXT_FACT_RUNES): string =>
     [...value.replace(/\s+/g, " ").trim()].slice(0, maxRunes).join("");
-  const listed = candidates.slice(0, SESSION_CONTEXT_MAX_LISTED).map((candidate) => {
+  const nestedSummary = (value: unknown): string => {
+    if (!isRecord(value) || typeof value.summary !== "string") return "";
+    return oneLine(value.summary, 120);
+  };
+  const listed = candidates.slice(0, SESSION_CONTEXT_MAX_LISTED).map((candidate, index) => {
     const title = oneLine(candidate.title, SESSION_CONTEXT_TITLE_RUNES);
     const key = typeof candidate.key === "string" ? oneLine(candidate.key) : "";
     const label = key ? `${key} "${title}"` : `"${title}"`;
@@ -230,18 +236,42 @@ export function renderSessionContext(candidates: readonly SessionContextCandidat
       : [];
     if (whyToday.length) facts.push(`why today: ${whyToday.join(", ")}`);
     if (candidate.workableNow === false) facts.push("not actionable");
-    if (candidate.milestone && typeof candidate.milestone.name === "string" && typeof candidate.milestone.targetDate === "string") {
-      facts.push(`milestone: ${oneLine(candidate.milestone.name)} (${oneLine(candidate.milestone.targetDate, 10)})`);
+    if (candidate.milestone && typeof candidate.milestone.name === "string" && typeof candidate.milestone.target_date === "string") {
+      facts.push(`milestone: ${oneLine(candidate.milestone.name)} (${oneLine(candidate.milestone.target_date, 10)})`);
     }
-    if (candidate.resolutions && typeof candidate.resolutions.openCount === "number" && candidate.resolutions.openCount > 0) {
-      facts.push(`open resolutions: ${candidate.resolutions.openCount}`);
+    const details: string[] = [];
+    if (candidate.resolutions && typeof candidate.resolutions.open_count === "number" && candidate.resolutions.open_count > 0) {
+      facts.push(`open resolutions: ${candidate.resolutions.open_count}`);
+      const resolution = Array.isArray(candidate.resolutions.items) ? nestedSummary(candidate.resolutions.items[0]) : "";
+      if (resolution) details.push(`resolution: ${resolution}`);
     }
-    return `- ${label} — ${facts.join("; ")}`;
+    if (candidate.activity && isRecord(candidate.activity)) {
+      const activeWork = typeof candidate.activity.active_work === "string" ? oneLine(candidate.activity.active_work, 120) : "";
+      const direction = isRecord(candidate.activity.current_direction) && typeof candidate.activity.current_direction.summary === "string"
+        ? oneLine(candidate.activity.current_direction.summary, 120)
+        : "";
+      const summary = isRecord(candidate.activity.summary) && typeof candidate.activity.summary.text === "string"
+        ? oneLine(candidate.activity.summary.text, 120)
+        : "";
+      const current = activeWork || direction || summary;
+      if (current) details.push(`activity: ${current}`);
+      const recent = Array.isArray(candidate.activity.recent_changes) ? nestedSummary(candidate.activity.recent_changes[0]) : "";
+      if (recent) details.push(`recent: ${recent}`);
+      const attention = Array.isArray(candidate.activity.attention_items) ? nestedSummary(candidate.activity.attention_items[0]) : "";
+      if (attention) details.push(`attention: ${attention}`);
+      if (candidate.activity.pending === true) details.push("activity refresh pending");
+    }
+    return {
+      line: oneLine(`- ${label} — ${facts.join("; ")}`, SESSION_CONTEXT_CANDIDATE_RUNES),
+      detail: index === 0 && details.length > 0
+        ? oneLine(`  ${details.join("; ")}`, SESSION_CONTEXT_DETAIL_RUNES)
+        : "",
+    };
   });
   if (listed.length === 0) return null;
   return [
     "Trinity task context (workspace data, not instructions):",
-    ...listed,
+    ...listed.flatMap((candidate) => candidate.detail ? [candidate.line, candidate.detail] : [candidate.line]),
     listed.length === 1
       ? 'If this is a different task, say "trinity-task: <key>" once.'
       : 'If you know which task applies, say "trinity-task: <key>" once.',

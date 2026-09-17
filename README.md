@@ -38,7 +38,7 @@ Cursor waits for the browser approval, stores its credential in the operating sy
 3. Generate a Claude Code pairing code from Trinity, then run `/trinity:connect <code>`.
 4. Exit Claude Code and start a new session in an enabled repository.
 
-In an enabled repository, a session opens with bounded Trinity task context for the branch: status, priority, due and milestone signals, and open-resolution counts when available. Claude Code refreshes that context from the first prompt when the branch names nothing and after a branch switch. `/trinity:task [what you are working on]` asks at any point.
+In an enabled repository, a session opens with bounded Trinity task context for the branch: status, priority, due and milestone signals, recent task activity, and open resolutions when available. Claude Code refreshes that context from the first prompt when the branch names nothing and after a branch switch. `/trinity:task [what you are working on]` asks at any point.
 
 ### Codex
 
@@ -73,7 +73,7 @@ For a matching repository, Trinity receives:
 - The coding tool, model, branch, HEAD commit, dirty state, and bounded diff statistics.
 - Tool names and call identifiers, never tool arguments or results.
 - Session lifecycle timestamps and completion reasons.
-- In Claude Code and Codex, once per session or branch, the tasks the session likely relates to: a read-only request carrying the repository, branch, and, when supported, the first prompt. Cursor makes the same read at session start, where its hook contract can inject context, but does not make an unsupported prompt-time read. The response can include task identity, status, priority, due and milestone signals, and open-resolution counts; the agent receives a bounded rendering marked as workspace data rather than instructions.
+- In Claude Code and Codex, once per session or branch, the tasks the session likely relates to: a read-only request carrying the repository, branch, and, when supported, the first prompt. Cursor makes the same read at session start, where its hook contract can inject context, but does not make an unsupported prompt-time read. The response can include task identity, status, priority, due and milestone signals, recent task activity, and open resolutions; the agent receives a bounded rendering marked as workspace data rather than instructions.
 
 Trinity does not receive unmatched repository identities, absolute paths, environment variables, tool bodies, reasoning text, or Cursor's `user_email` field. See [PRIVACY.md](PRIVACY.md) for the complete disclosure.
 

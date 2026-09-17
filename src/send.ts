@@ -74,8 +74,21 @@ export interface SessionContextCandidate {
   dueDate?: string;
   whyToday?: string[];
   workableNow?: boolean;
-  milestone?: { id: string; name: string; targetDate: string };
-  resolutions?: { openCount: number };
+  milestone?: { id: string; name: string; target_date: string };
+  activity?: {
+    initialized?: boolean;
+    active_work?: string;
+    summary?: { text?: string };
+    recent_changes?: { summary?: string }[];
+    current_direction?: { summary?: string };
+    attention_items?: { summary?: string }[];
+    recommendations?: { summary?: string }[];
+    pending?: boolean;
+  };
+  resolutions?: {
+    open_count?: number;
+    items?: { summary?: string; latest_update?: string }[];
+  };
 }
 
 export interface SessionContextAnswer {
