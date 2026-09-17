@@ -181,6 +181,7 @@ export const claudeCodeDialect: Dialect = {
   // declared "async": true — so drains are budgeted inline, like codex's.
   drainInline: true,
   dataDir: resolveDataDir,
+  contextEvents: ["SessionStart", "UserPromptSubmit"],
   // SessionStart and UserPromptSubmit hooks hand Claude extra context through
   // this JSON on stdout; the same shape names the event it answers.
   contextOutput: (event, context) => JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: context } }),

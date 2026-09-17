@@ -37,11 +37,12 @@ pnpm build:plugin-cursor   # regenerate cursor/dist/
   event, never a strip list.
 - Store an event in the local outbox before attempting network I/O.
 - The session-context pull (`fetchSessionContext`) is the one read a hook makes: once per
-  session, bounded by the hook budget, sending nothing the capture allowlist does not already
-  forward, never blocking or reordering capture, and only for a dialect with a `contextOutput`
-  door (Claude Code today). It runs at SessionStart, once more on the first prompt when the
-  branch named nothing, again when a prompt arrives on a branch the session has not asked
-  about, and on demand through `/trinity:task` (`src/session-context.ts`).
+  session or branch, bounded by the hook budget, sending nothing the capture allowlist does not
+  already forward, never blocking or reordering capture, and only on events the dialect lists
+  in `contextEvents`. Claude Code and Codex run it at SessionStart, once more on the first prompt
+  when the branch named nothing, and again when a prompt arrives on a branch the session has not
+  asked about. Cursor runs it at sessionStart only because beforeSubmitPrompt cannot inject
+  context. Claude Code also exposes the on-demand `/trinity:task` command (`src/session-context.ts`).
 - Unmatched repositories never send session events.
 - Every product's `dist/` is committed. Regenerate the relevant one after changing
   `src/`, and keep the generated diff in the same commit; CI diffs all three.

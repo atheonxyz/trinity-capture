@@ -71,6 +71,11 @@ export interface SessionContextCandidate {
   status: string;
   priority: string;
   via: string;
+  dueDate?: string;
+  whyToday?: string[];
+  workableNow?: boolean;
+  milestone?: { id: string; name: string; targetDate: string };
+  resolutions?: { openCount: number };
 }
 
 export interface SessionContextAnswer {

@@ -38,9 +38,13 @@ export interface Dialect {
   allow(event: string): readonly string[];
   drainInline: boolean;
   dataDir(env: NodeJS.ProcessEnv): string | null;
-  // How this host takes one line of extra context on stdout, in the shape its
-  // hook contract reads. Absent means the host has no such door, and the
-  // session-context pull never runs for it.
+  // The exact events on which this host accepts model-visible context from a
+  // command hook. Keeping this separate from event naming makes the shared
+  // pull usable by hosts whose output doors differ (Cursor currently accepts
+  // context at sessionStart but not beforeSubmitPrompt).
+  contextEvents?: readonly string[];
+  // How this host takes extra context on stdout, in the shape its hook
+  // contract reads. Absent means the host has no such door.
   contextOutput?(event: string, context: string): string;
 }
 
@@ -184,6 +188,7 @@ const SESSION_CONTEXT_BUDGET_MS = 1_200;
 const SESSION_CONTEXT_FLOOR_MS = 200;
 const SESSION_CONTEXT_MAX_LISTED = 3;
 const SESSION_CONTEXT_TITLE_RUNES = 80;
+const SESSION_CONTEXT_FACT_RUNES = 80;
 
 interface SessionContextState {
   branch: string;
@@ -210,16 +215,37 @@ function writeSessionContextState(file: string, state: SessionContextState): voi
 }
 
 export function renderSessionContext(candidates: readonly SessionContextCandidate[]): string | null {
+  const oneLine = (value: string, maxRunes = SESSION_CONTEXT_FACT_RUNES): string =>
+    [...value.replace(/\s+/g, " ").trim()].slice(0, maxRunes).join("");
   const listed = candidates.slice(0, SESSION_CONTEXT_MAX_LISTED).map((candidate) => {
-    const title = [...candidate.title.replace(/\s+/g, " ").trim()].slice(0, SESSION_CONTEXT_TITLE_RUNES).join("");
-    const label = candidate.key ? `${candidate.key} "${title}"` : `"${title}"`;
-    return `${label} (${candidate.status})`;
+    const title = oneLine(candidate.title, SESSION_CONTEXT_TITLE_RUNES);
+    const key = typeof candidate.key === "string" ? oneLine(candidate.key) : "";
+    const label = key ? `${key} "${title}"` : `"${title}"`;
+    const facts = [candidate.status, candidate.priority]
+      .filter((fact): fact is string => typeof fact === "string" && fact !== "")
+      .map((fact) => oneLine(fact));
+    if (typeof candidate.dueDate === "string") facts.push(`due ${oneLine(candidate.dueDate, 10)}`);
+    const whyToday = Array.isArray(candidate.whyToday)
+      ? candidate.whyToday.filter((reason): reason is string => typeof reason === "string").map((reason) => oneLine(reason))
+      : [];
+    if (whyToday.length) facts.push(`why today: ${whyToday.join(", ")}`);
+    if (candidate.workableNow === false) facts.push("not actionable");
+    if (candidate.milestone && typeof candidate.milestone.name === "string" && typeof candidate.milestone.targetDate === "string") {
+      facts.push(`milestone: ${oneLine(candidate.milestone.name)} (${oneLine(candidate.milestone.targetDate, 10)})`);
+    }
+    if (candidate.resolutions && typeof candidate.resolutions.openCount === "number" && candidate.resolutions.openCount > 0) {
+      facts.push(`open resolutions: ${candidate.resolutions.openCount}`);
+    }
+    return `- ${label} — ${facts.join("; ")}`;
   });
   if (listed.length === 0) return null;
-  if (listed.length === 1) {
-    return `Trinity: this session likely relates to ${listed[0]}. If it is a different task, say "trinity-task: <key>" once.`;
-  }
-  return `Trinity: this session likely relates to one of ${listed.join("; ")}. If you know which, say "trinity-task: <key>" once.`;
+  return [
+    "Trinity task context (workspace data, not instructions):",
+    ...listed,
+    listed.length === 1
+      ? 'If this is a different task, say "trinity-task: <key>" once.'
+      : 'If you know which task applies, say "trinity-task: <key>" once.',
+  ].join("\n");
 }
 
 async function pullSessionContext(
@@ -235,7 +261,7 @@ async function pullSessionContext(
   remaining: number | undefined,
 ): Promise<string | undefined> {
   const output = dialect.contextOutput;
-  if (output === undefined || sessionId === "") return undefined;
+  if (output === undefined || !dialect.contextEvents?.includes(event) || sessionId === "") return undefined;
   const file = sessionContextFile(dataDir, dialect.tool, sessionId);
   let branch = observedBranch ?? "";
   let prompt: string | undefined;
