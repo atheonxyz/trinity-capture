@@ -23,9 +23,7 @@ export interface Dialect {
   // vendor ids on any other turn-scoped event still lazily mint — required
   // by dialects whose first observable turn-scoped event isn't this one.
   isPromptSubmit(event: string): boolean;
-  // Gates the stale-policy self-heal refresh and the workspace.observed
-  // synthesis — both are "new session" moments, not necessarily named
-  // "SessionStart" (dialects use their own event vocabulary).
+  // A "new session" moment in the dialect's own vocabulary: synthesizes workspace.observed and refreshes a stale policy without the retry wait.
   isSessionStart(event: string): boolean;
   isFreshSessionStart?(event: string, payload: Record<string, unknown>): boolean;
   // Gates WHETHER this event drains at all (a dialect whose hooks run
@@ -42,8 +40,23 @@ export interface Dialect {
 
 const SETUP_PROMPT_PREFIX = "[Trinity setup]\n";
 
+const POLICY_RETRY_MS = 60_000;
+
 function isENOENT(error: unknown): boolean {
   return error instanceof Error && "code" in error && error.code === "ENOENT";
+}
+
+// One mid-session policy refresh per minute, so a dead token or an outage cannot tax every hook.
+function claimPolicyRefresh(dataDir: string): boolean {
+  const marker = join(dataDir, "policy-refresh-attempt");
+  const now = Date.now();
+  try {
+    if (now - Number(readFileSync(marker, "utf8")) < POLICY_RETRY_MS) return false;
+  } catch (error) {
+    if (!isENOENT(error)) return false;
+  }
+  writeFileSync(marker, String(now), { mode: 0o600 });
+  return true;
 }
 
 function suppressSetupSession(
@@ -189,13 +202,15 @@ export async function runHook(dialect: Dialect, event: string, stdin: string, en
   const gitRemote = gitRemoteOf(cwd);
   let policy = loadPolicy(dataDir);
   const remaining = dialect.drainInline ? hookEntryDeadline - Date.now() : undefined;
-  if (dialect.isSessionStart(event) && !isPolicyFresh(policy, Date.now())) {
-    if (remaining === undefined || remaining > 0) {
-      try {
-        policy = await refreshPolicy(dataDir, cfg, remaining);
-      } catch {
-        policy = null;
-      }
+  if (
+    !isPolicyFresh(policy, Date.now()) &&
+    (remaining === undefined || remaining > 0) &&
+    (dialect.isSessionStart(event) || claimPolicyRefresh(dataDir))
+  ) {
+    try {
+      policy = await refreshPolicy(dataDir, cfg, remaining);
+    } catch {
+      policy = null;
     }
   }
 

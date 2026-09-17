@@ -10,7 +10,7 @@
       "name": "trinity-capture",
       "displayName": "Trinity",
       "description": "Captures Claude Code sessions into Trinity for allowlisted repositories.",
-      "version": "0.2.8",
+      "version": "0.2.9",
       "source": "./claude-code"
     }
   ]

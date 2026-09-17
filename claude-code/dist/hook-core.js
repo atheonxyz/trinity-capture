@@ -13,8 +13,24 @@ import { appendEvent, drain, INLINE_DRAIN_BUDGET_MS } from "./outbox.js";
 import { gitRemoteOf, repoRelativeCwd, workspaceObserved } from "./observe.js";
 import { refreshPolicy } from "./send.js";
 const SETUP_PROMPT_PREFIX = "[Trinity setup]\n";
+const POLICY_RETRY_MS = 60_000;
 function isENOENT(error) {
     return error instanceof Error && "code" in error && error.code === "ENOENT";
+}
+// One mid-session policy refresh per minute, so a dead token or an outage cannot tax every hook.
+function claimPolicyRefresh(dataDir) {
+    const marker = join(dataDir, "policy-refresh-attempt");
+    const now = Date.now();
+    try {
+        if (now - Number(readFileSync(marker, "utf8")) < POLICY_RETRY_MS)
+            return false;
+    }
+    catch (error) {
+        if (!isENOENT(error))
+            return false;
+    }
+    writeFileSync(marker, String(now), { mode: 0o600 });
+    return true;
 }
 function suppressSetupSession(dataDir, dialect, event, payload) {
     const sessionId = dialect.sessionId(event, payload);
@@ -156,14 +172,14 @@ export async function runHook(dialect, event, stdin, env) {
     const gitRemote = gitRemoteOf(cwd);
     let policy = loadPolicy(dataDir);
     const remaining = dialect.drainInline ? hookEntryDeadline - Date.now() : undefined;
-    if (dialect.isSessionStart(event) && !isPolicyFresh(policy, Date.now())) {
-        if (remaining === undefined || remaining > 0) {
-            try {
-                policy = await refreshPolicy(dataDir, cfg, remaining);
-            }
-            catch {
-                policy = null;
-            }
+    if (!isPolicyFresh(policy, Date.now()) &&
+        (remaining === undefined || remaining > 0) &&
+        (dialect.isSessionStart(event) || claimPolicyRefresh(dataDir))) {
+        try {
+            policy = await refreshPolicy(dataDir, cfg, remaining);
+        }
+        catch {
+            policy = null;
         }
     }
     const route = await resolveRoute(policy, gitRemote, (fullName) => {
