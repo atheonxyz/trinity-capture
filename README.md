@@ -75,7 +75,7 @@ Trinity does not receive unmatched repository identities, absolute paths, enviro
 Each host invokes a short-lived Node.js hook process. The shared core:
 
 1. Resolves the plugin's private data directory.
-2. Loads the signed-in device credential and cached capture policy.
+2. Loads the signed-in device credential and cached capture policy, refreshing the policy on any event once its TTL has passed (a failed refresh is retried at most once a minute until the next session start).
 3. Resolves the current Git remote locally.
 4. Fails closed unless the policy is fresh and the repository is allowlisted.
 5. Filters the native hook payload through an event-specific allowlist.
