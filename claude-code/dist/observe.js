@@ -33,8 +33,11 @@ export function repoRelativeCwd(cwd) {
     const rel = relative(top, resolvedCwd);
     return rel === "" ? "." : rel;
 }
+export function currentBranch(cwd) {
+    return git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
+}
 export function workspaceObserved(cwd) {
-    const branch = git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
+    const branch = currentBranch(cwd);
     if (branch === null)
         return null; // outside a repo
     const headSha = git(cwd, ["rev-parse", "HEAD"]);

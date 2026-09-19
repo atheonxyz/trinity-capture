@@ -8,6 +8,7 @@ import { runHook } from "../src/hook-core.js";
 import { codexDialect } from "../src/codex-hook.js";
 import { saveConfig, savePolicy } from "../src/config.js";
 import type { DeviceConfig, Policy } from "../src/config.js";
+import { stubFetch } from "./helpers/claude-hook-fixture.js";
 
 function tmpDataDir(): string {
   return mkdtempSync(join(tmpdir(), "trinity-codex-data-"));
@@ -57,7 +58,7 @@ function loadFixtureLines(): Record<string, unknown>[] {
 // Every call goes through the real dialect table + the shared engine, the
 // same way the CLI bootstrap does — just with an in-memory env instead of
 // argv/stdin.
-function runCodexHook(payload: Record<string, unknown>, dataDir: string): Promise<void> {
+function runCodexHook(payload: Record<string, unknown>, dataDir: string): Promise<string | undefined> {
   const eventName = payload.hook_event_name as string;
   return runHook(codexDialect, eventName, JSON.stringify(payload), { ...process.env, PLUGIN_DATA: dataDir });
 }
@@ -88,6 +89,31 @@ test("SessionStart in an allowlisted repo appends the session event and workspac
   assert.ok(started, "SessionStart must be captured");
   assert.equal(started.payload.model, "gpt-5.6-sol", "the real model field must be forwarded — the codex decoder projects it");
   assert.equal(started.turnKey, undefined, "SessionStart must carry no turnKey");
+});
+
+test("SessionStart pulls task context and returns Codex's additionalContext shape", async () => {
+  const dataDir = tmpDataDir();
+  const cfg: DeviceConfig = { token: "tok", ingestUrl: "https://ingest.example/api/v1/ingest/batches", deviceId: "dev1" };
+  saveConfig(dataDir, cfg);
+  savePolicy(dataDir, freshPolicy("github.com/acme/widgets"));
+  const repo = initRepo("git@github.com:acme/widgets.git");
+  const restore = stubFetch({
+    onSessionContext: () => Response.json({
+      schemaVersion: 2,
+      route: "project",
+      candidates: [{ taskId: "t1", key: "ENG-7", title: "Add task sync", status: "todo", priority: "P1", via: "branch", whyToday: ["due_today"] }],
+    }),
+  });
+  try {
+    const [sessionStart] = loadFixtureLines();
+    const output = await runCodexHook({ ...sessionStart, cwd: repo }, dataDir);
+    assert.ok(output !== undefined);
+    const parsed = JSON.parse(output) as { hookSpecificOutput: { hookEventName: string; additionalContext: string } };
+    assert.equal(parsed.hookSpecificOutput.hookEventName, "SessionStart");
+    assert.match(parsed.hookSpecificOutput.additionalContext, /ENG-7 "Add task sync" — todo; P1; why today: due_today/);
+  } finally {
+    restore();
+  }
 });
 
 test("gate fail-closed: an unpaired device appends nothing and never throws", async () => {

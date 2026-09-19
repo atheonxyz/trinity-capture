@@ -33,7 +33,7 @@ export function runClaudeHook(
   eventName: string,
   input: Record<string, unknown>,
   dataDir: string,
-): Promise<void> {
+): Promise<string | undefined> {
   return runHook(claudeCodeDialect, eventName, JSON.stringify(input), {
     ...process.env,
     CLAUDE_PLUGIN_DATA: dataDir,
@@ -43,10 +43,17 @@ export function runClaudeHook(
 export function stubFetch(options: {
   readonly onPolicy?: () => Response;
   readonly onBatch?: (items: readonly { readonly captureEventId: string }[]) => Response;
+  readonly onSessionContext?: (body: Record<string, unknown>, init?: RequestInit) => Response;
 }): () => void {
   const original = globalThis.fetch;
   const stub: typeof fetch = async (url, init) => {
     const href = String(url);
+    if (href.endsWith("/session-context")) {
+      if (!options.onSessionContext) throw new Error(`unexpected session-context fetch: ${href}`);
+      const parsed: unknown = JSON.parse(String(init?.body));
+      if (typeof parsed !== "object" || parsed === null) throw new Error("session-context body is not an object");
+      return options.onSessionContext(parsed as Record<string, unknown>, init);
+    }
     if (href.endsWith("/policy")) {
       if (!options.onPolicy) throw new Error(`unexpected policy fetch: ${href}`);
       return options.onPolicy();

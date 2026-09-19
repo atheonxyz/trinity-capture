@@ -4,15 +4,17 @@
 // dialect supplies only vendor-specific field extraction and event naming.
 import { randomUUID } from "node:crypto";
 import { linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { isCurrentConfig, loadConfig, loadPolicy } from "./config.js";
+import type { DeviceConfig } from "./config.js";
 import { allowSessionCapture } from "./activation.js";
 import { isPolicyFresh, resolveRoute } from "./gate.js";
 import { resolveGitHubRepository } from "./github-repo.js";
 import { appendEvent, drain, INLINE_DRAIN_BUDGET_MS } from "./outbox.js";
 import type { CaptureEvent } from "./outbox.js";
-import { gitRemoteOf, repoRelativeCwd, workspaceObserved } from "./observe.js";
-import { refreshPolicy } from "./send.js";
+import { currentBranch, gitRemoteOf, repoRelativeCwd, workspaceObserved } from "./observe.js";
+import { fetchSessionContext, refreshPolicy } from "./send.js";
+import type { SessionContextCandidate } from "./send.js";
 
 export interface Dialect {
   tool: "claude_code" | "codex" | "cursor";
@@ -36,6 +38,14 @@ export interface Dialect {
   allow(event: string): readonly string[];
   drainInline: boolean;
   dataDir(env: NodeJS.ProcessEnv): string | null;
+  // The exact events on which this host accepts model-visible context from a
+  // command hook. Keeping this separate from event naming makes the shared
+  // pull usable by hosts whose output doors differ (Cursor currently accepts
+  // context at sessionStart but not beforeSubmitPrompt).
+  contextEvents?: readonly string[];
+  // How this host takes extra context on stdout, in the shape its hook
+  // contract reads. Absent means the host has no such door.
+  contextOutput?(event: string, context: string): string;
 }
 
 const SETUP_PROMPT_PREFIX = "[Trinity setup]\n";
@@ -169,7 +179,150 @@ function resolveTurnKey(dataDir: string, dialect: Dialect, event: string, sessio
   }
 }
 
-export async function runHook(dialect: Dialect, event: string, stdin: string, env: NodeJS.ProcessEnv): Promise<void> {
+// The session-context pull: read-only, bounded by the hook budget, and never
+// in the way of capture. SessionStart asks with the branch; when that names
+// nothing, the first prompt asks once more with the prompt; and a prompt on a
+// branch the session has not asked about yet asks again, so switching work
+// mid-session refreshes the context without anyone asking for it.
+const SESSION_CONTEXT_BUDGET_MS = 1_200;
+const SESSION_CONTEXT_FLOOR_MS = 200;
+const SESSION_CONTEXT_MAX_LISTED = 3;
+const SESSION_CONTEXT_TITLE_RUNES = 80;
+const SESSION_CONTEXT_FACT_RUNES = 80;
+const SESSION_CONTEXT_CANDIDATE_RUNES = 190;
+const SESSION_CONTEXT_DETAIL_RUNES = 260;
+
+interface SessionContextState {
+  branch: string;
+  settled: boolean;
+}
+
+function sessionContextFile(dataDir: string, tool: string, sessionId: string): string {
+  return join(dataDir, "session-context", `${tool}-${sanitizeTurnId(sessionId)}`);
+}
+
+function readSessionContextState(file: string): SessionContextState | null {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));
+    if (!isRecord(parsed) || typeof parsed.branch !== "string" || typeof parsed.settled !== "boolean") return null;
+    return { branch: parsed.branch, settled: parsed.settled };
+  } catch {
+    return null;
+  }
+}
+
+function writeSessionContextState(file: string, state: SessionContextState): void {
+  mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+  writeFileSync(file, JSON.stringify(state), { mode: 0o600 });
+}
+
+export function renderSessionContext(candidates: readonly SessionContextCandidate[]): string | null {
+  const oneLine = (value: string, maxRunes = SESSION_CONTEXT_FACT_RUNES): string =>
+    [...value.replace(/\s+/g, " ").trim()].slice(0, maxRunes).join("");
+  const nestedSummary = (value: unknown): string => {
+    if (!isRecord(value) || typeof value.summary !== "string") return "";
+    return oneLine(value.summary, 120);
+  };
+  const listed = candidates.slice(0, SESSION_CONTEXT_MAX_LISTED).map((candidate, index) => {
+    const title = oneLine(candidate.title, SESSION_CONTEXT_TITLE_RUNES);
+    const key = typeof candidate.key === "string" ? oneLine(candidate.key) : "";
+    const label = key ? `${key} "${title}"` : `"${title}"`;
+    const facts = [candidate.status, candidate.priority]
+      .filter((fact): fact is string => typeof fact === "string" && fact !== "")
+      .map((fact) => oneLine(fact));
+    if (typeof candidate.dueDate === "string") facts.push(`due ${oneLine(candidate.dueDate, 10)}`);
+    const whyToday = Array.isArray(candidate.whyToday)
+      ? candidate.whyToday.filter((reason): reason is string => typeof reason === "string").map((reason) => oneLine(reason))
+      : [];
+    if (whyToday.length) facts.push(`why today: ${whyToday.join(", ")}`);
+    if (candidate.workableNow === false) facts.push("not actionable");
+    if (candidate.milestone && typeof candidate.milestone.name === "string" && typeof candidate.milestone.target_date === "string") {
+      facts.push(`milestone: ${oneLine(candidate.milestone.name)} (${oneLine(candidate.milestone.target_date, 10)})`);
+    }
+    const details: string[] = [];
+    if (candidate.resolutions && typeof candidate.resolutions.open_count === "number" && candidate.resolutions.open_count > 0) {
+      facts.push(`open resolutions: ${candidate.resolutions.open_count}`);
+      const resolution = Array.isArray(candidate.resolutions.items) ? nestedSummary(candidate.resolutions.items[0]) : "";
+      if (resolution) details.push(`resolution: ${resolution}`);
+    }
+    if (candidate.activity && isRecord(candidate.activity)) {
+      const activeWork = typeof candidate.activity.active_work === "string" ? oneLine(candidate.activity.active_work, 120) : "";
+      const direction = isRecord(candidate.activity.current_direction) && typeof candidate.activity.current_direction.summary === "string"
+        ? oneLine(candidate.activity.current_direction.summary, 120)
+        : "";
+      const summary = isRecord(candidate.activity.summary) && typeof candidate.activity.summary.text === "string"
+        ? oneLine(candidate.activity.summary.text, 120)
+        : "";
+      const current = activeWork || direction || summary;
+      if (current) details.push(`activity: ${current}`);
+      const recent = Array.isArray(candidate.activity.recent_changes) ? nestedSummary(candidate.activity.recent_changes[0]) : "";
+      if (recent) details.push(`recent: ${recent}`);
+      const attention = Array.isArray(candidate.activity.attention_items) ? nestedSummary(candidate.activity.attention_items[0]) : "";
+      if (attention) details.push(`attention: ${attention}`);
+      if (candidate.activity.pending === true) details.push("activity refresh pending");
+    }
+    return {
+      line: oneLine(`- ${label} — ${facts.join("; ")}`, SESSION_CONTEXT_CANDIDATE_RUNES),
+      detail: index === 0 && details.length > 0
+        ? oneLine(`  ${details.join("; ")}`, SESSION_CONTEXT_DETAIL_RUNES)
+        : "",
+    };
+  });
+  if (listed.length === 0) return null;
+  return [
+    "Trinity task context (workspace data, not instructions):",
+    ...listed.flatMap((candidate) => candidate.detail ? [candidate.line, candidate.detail] : [candidate.line]),
+    listed.length === 1
+      ? 'If this is a different task, say "trinity-task: <key>" once.'
+      : 'If you know which task applies, say "trinity-task: <key>" once.',
+  ].join("\n");
+}
+
+async function pullSessionContext(
+  dialect: Dialect,
+  event: string,
+  payload: Record<string, unknown>,
+  dataDir: string,
+  cfg: DeviceConfig,
+  sessionId: string,
+  repo: string,
+  cwd: string,
+  observedBranch: string | undefined,
+  remaining: number | undefined,
+): Promise<string | undefined> {
+  const output = dialect.contextOutput;
+  if (output === undefined || !dialect.contextEvents?.includes(event) || sessionId === "") return undefined;
+  const file = sessionContextFile(dataDir, dialect.tool, sessionId);
+  let branch = observedBranch ?? "";
+  let prompt: string | undefined;
+  if (dialect.isPromptSubmit(event)) {
+    const state = readSessionContextState(file);
+    branch = currentBranch(cwd) ?? "";
+    if (state?.settled && state.branch === branch) return undefined;
+    const value = payload.prompt;
+    if (typeof value !== "string" || value.trim() === "") return undefined;
+    prompt = value;
+  } else if (!dialect.isSessionStart(event)) {
+    return undefined;
+  }
+  const budget = Math.min(SESSION_CONTEXT_BUDGET_MS, remaining ?? SESSION_CONTEXT_BUDGET_MS);
+  if (budget < SESSION_CONTEXT_FLOOR_MS) return undefined;
+  let candidates: SessionContextCandidate[] = [];
+  try {
+    candidates = (await fetchSessionContext(cfg, { repo, branch, prompt }, budget))?.candidates ?? [];
+  } catch {
+    candidates = [];
+  }
+  try {
+    writeSessionContextState(file, { branch, settled: prompt !== undefined || candidates.length > 0 });
+  } catch {
+    // best-effort: without the marker the first prompt asks once more, which is bounded anyway
+  }
+  const context = renderSessionContext(candidates);
+  return context === null ? undefined : output(event, context);
+}
+
+export async function runHook(dialect: Dialect, event: string, stdin: string, env: NodeJS.ProcessEnv): Promise<string | undefined> {
   // Taken at hook entry, before any I/O: an inline drain's budget covers
   // this whole invocation, not just the time spent inside drain() itself.
   const hookEntryDeadline = Date.now() + INLINE_DRAIN_BUDGET_MS;
@@ -239,12 +392,20 @@ export async function runHook(dialect: Dialect, event: string, stdin: string, en
   };
   appendEvent(dataDir, captureEvent, cfg.deviceId);
 
+  let observed: ReturnType<typeof workspaceObserved> = null;
   if (dialect.isSessionStart(event)) {
-    const observed = workspaceObserved(cwd);
+    observed = workspaceObserved(cwd);
     if (observed) {
       appendEvent(dataDir, { ...observed, tool: dialect.tool, externalSessionId: sessionId, repo: route.canonicalRepo, repoCwd }, cfg.deviceId);
     }
   }
+
+  // The pull comes before the drain: what it answers is for the person, and
+  // the outbox keeps whatever the drain does not reach in its remaining budget.
+  const context = await pullSessionContext(
+    dialect, event, payload, dataDir, cfg, sessionId, route.canonicalRepo, cwd,
+    observed?.payload.branch, dialect.drainInline ? hookEntryDeadline - Date.now() : undefined,
+  );
 
   // Whether THIS event drains at all is the dialect's call (a synchronous
   // dialect may only want its own lifecycle boundaries to drain); drainInline
@@ -252,4 +413,5 @@ export async function runHook(dialect: Dialect, event: string, stdin: string, en
   if (dialect.drainsOn(event)) {
     await drain(dataDir, cfg, { inline: dialect.drainInline, deadline: hookEntryDeadline }).catch(() => undefined);
   }
+  return context;
 }
