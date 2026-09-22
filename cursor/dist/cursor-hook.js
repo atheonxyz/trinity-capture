@@ -13,7 +13,7 @@
 // vendorTurnId = generation_id for every turn-scoped kind and null for the
 // two session-scoped kinds despite their shared lifecycle generation_id.
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeSync } from "node:fs";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "./config.js";
@@ -76,6 +76,11 @@ export const cursorDialect = {
     allow: (event) => [...ALLOW_EVERY_EVENT, ...(ALLOW_PER_EVENT[event] ?? [])],
     drainInline: true,
     dataDir: (env) => cursorDataDir(env),
+    // Cursor accepts additional_context at sessionStart. Its
+    // beforeSubmitPrompt output currently supports validation only, so the
+    // shared pull deliberately makes no prompt-time request for this dialect.
+    contextEvents: ["sessionStart"],
+    contextOutput: (_event, context) => JSON.stringify({ additional_context: context }),
 };
 // Cursor's docs and capture expose no CURSOR_PLUGIN_DATA equivalent (unlike
 // CURSOR_PLUGIN_ROOT, which does exist and locates the installed plugin's
@@ -129,16 +134,18 @@ export async function runCursorHook(event, stdin, env) {
         if (dataDir && loadConfig(dataDir)) {
             recordDrop(dataDir, { reason: "multi_root", captureEventId: randomUUID(), kind: event });
         }
-        return;
+        return undefined;
     }
-    await runHook(cursorDialect, event, stdin, env);
+    return runHook(cursorDialect, event, stdin, env);
 }
 async function cli() {
     const eventName = process.argv[2];
     if (!eventName)
         return;
     const stdin = readFileSync(0, "utf8");
-    await runCursorHook(eventName, stdin, process.env);
+    const output = await runCursorHook(eventName, stdin, process.env);
+    if (output !== undefined)
+        writeSync(1, `${output}\n`);
 }
 if (isMainModule(import.meta.url)) {
     cli()

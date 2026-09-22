@@ -36,8 +36,22 @@ export function repoRelativeCwd(cwd: string): string {
   return rel === "" ? "." : rel;
 }
 
-export function workspaceObserved(cwd: string): CaptureEvent | null {
-  const branch = git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
+export interface WorkspacePayload {
+  branch: string;
+  branches: string[];
+  head_sha: string | null;
+  dirty: boolean;
+  diffstat_add: number;
+  diffstat_del: number;
+  changed_files: string[];
+}
+
+export function currentBranch(cwd: string): string | null {
+  return git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
+}
+
+export function workspaceObserved(cwd: string): (CaptureEvent & { payload: WorkspacePayload }) | null {
+  const branch = currentBranch(cwd);
   if (branch === null) return null; // outside a repo
 
   const headSha = git(cwd, ["rev-parse", "HEAD"]);

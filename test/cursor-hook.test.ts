@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { cursorDataDir, cursorDialect, runCursorHook } from "../src/cursor-hook.js";
 import { saveConfig, savePolicy } from "../src/config.js";
 import type { DeviceConfig, Policy } from "../src/config.js";
+import { stubFetch } from "./helpers/claude-hook-fixture.js";
 
 // Pins test/testdata/cursor_session.jsonl against the constant recorded in
 // both trinity-capture's and trinity's own copy of this fixture (the
@@ -64,7 +65,7 @@ function pairedDataDir(): { dataDir: string; repo: string } {
 // Every call goes through the real dialect + the shared engine, the same
 // way the CLI bootstrap does — just with dataDir pinned via env instead of
 // relying on the platform default resolveDataDir would otherwise pick.
-function run(event: string, payload: Record<string, unknown>, dataDir: string): Promise<void> {
+function run(event: string, payload: Record<string, unknown>, dataDir: string): Promise<string | undefined> {
   return runCursorHook(event, JSON.stringify(payload), { ...process.env, TRINITY_CAPTURE_DATA: dataDir });
 }
 
@@ -136,6 +137,53 @@ test("drainsOn is true only for the two lifecycle boundaries; drainInline is tru
   assert.equal(cursorDialect.drainsOn("sessionEnd"), true);
   for (const event of ["sessionStart", "beforeSubmitPrompt", "preToolUse", "beforeReadFile", "postToolUse", "stop"]) {
     assert.equal(cursorDialect.drainsOn(event), false, `${event} must not drain — draining on a mid-turn hook would stall the agent`);
+  }
+});
+
+test("sessionStart injects Cursor additional_context", async () => {
+  const { dataDir, repo } = pairedDataDir();
+  let calls = 0;
+  const restore = stubFetch({
+    onSessionContext: () => {
+      calls++;
+      return Response.json({ route: "project", candidates: [{
+        taskId: "t1", key: "ENG-7", title: "Add task sync", status: "todo", priority: "P1", via: "branch",
+      }] });
+    },
+  });
+  try {
+    const [sessionStart] = fixtureLines();
+    const output = await run("sessionStart", { ...sessionStart, workspace_roots: [repo] }, dataDir);
+    assert.ok(output !== undefined);
+    const parsed = JSON.parse(output) as { additional_context: string };
+    assert.match(parsed.additional_context, /ENG-7 "Add task sync" — todo; P1/);
+
+    assert.equal(calls, 1);
+  } finally {
+    restore();
+  }
+});
+
+test("Cursor makes no unsupported prompt-time context pull when sessionStart found nothing", async () => {
+  const { dataDir, repo } = pairedDataDir();
+  let calls = 0;
+  const restore = stubFetch({
+    onSessionContext: () => {
+      calls++;
+      return Response.json({ route: "project", candidates: [] });
+    },
+  });
+  try {
+    const [sessionStart] = fixtureLines();
+    assert.equal(await run("sessionStart", { ...sessionStart, workspace_roots: [repo] }, dataDir), undefined);
+    const promptOutput = await run("beforeSubmitPrompt", {
+      hook_event_name: "beforeSubmitPrompt", conversation_id: "vendor-id-001", generation_id: "vendor-id-002",
+      prompt: "add task sync", workspace_roots: [repo],
+    }, dataDir);
+    assert.equal(promptOutput, undefined);
+    assert.equal(calls, 1, "Cursor beforeSubmitPrompt cannot inject context, so it must not make a wasted read");
+  } finally {
+    restore();
   }
 });
 

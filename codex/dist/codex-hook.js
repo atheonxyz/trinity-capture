@@ -2,7 +2,7 @@
 // and the hook JSON on stdin. Must never throw to the IDE: the CLI bootstrap
 // below always exits 0. Everything vendor-specific lives here as one Dialect
 // table; runHook (hook-core.ts) owns the shared engine.
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { runHook } from "./hook-core.js";
 import { DEFAULT_BASE_URL } from "./connect.js";
@@ -81,6 +81,10 @@ export const codexDialect = {
     // user-level hooks stanza outside the plugin layer, README's "Fallback"
     // section) where PLUGIN_DATA may not exist at all.
     dataDir: (env) => env.TRINITY_CAPTURE_DATA ?? env.PLUGIN_DATA ?? null,
+    // Codex supports the Claude-compatible hookSpecificOutput.additionalContext
+    // shape on both lifecycle events used by the shared pull.
+    contextEvents: ["SessionStart", "UserPromptSubmit"],
+    contextOutput: (event, context) => JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: context } }),
 };
 async function cli() {
     const eventName = process.argv[2];
@@ -97,7 +101,9 @@ async function cli() {
         if (!(error instanceof Error))
             throw error;
     }
-    await runHook(codexDialect, eventName, stdin, process.env);
+    const output = await runHook(codexDialect, eventName, stdin, process.env);
+    if (output !== undefined)
+        writeSync(1, `${output}\n`);
 }
 if (isMainModule(import.meta.url)) {
     cli()

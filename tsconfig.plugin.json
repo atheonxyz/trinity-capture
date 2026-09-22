@@ -15,6 +15,7 @@
     "src/observe.ts",
     "src/hook-core.ts",
     "src/claude-hook.ts",
-    "src/connect.ts"
+    "src/connect.ts",
+    "src/session-context.ts"
   ]
 }
