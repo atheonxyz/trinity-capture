@@ -1,5 +1,6 @@
 // The /trinity:task command: the same pull the hooks make, on demand at any
 // point in a session, with whatever the person says they are working on.
+import { readFileSync } from "node:fs";
 import { claudeCodeDialect } from "./claude-hook.js";
 import { loadConfig, loadPolicy } from "./config.js";
 import { isPolicyFresh, resolveRoute } from "./gate.js";
@@ -23,7 +24,21 @@ export function describeCandidates(candidates) {
     ].join("\n");
 }
 async function main() {
-    const env = { ...process.env, CLAUDE_PLUGIN_DATA: process.env.CLAUDE_PLUGIN_DATA ?? process.argv[3] };
+    // Free text arrives as JSON on stdin, never interpolated into shell arguments.
+    let prompt;
+    try {
+        const input = JSON.parse(readFileSync(0, "utf8"));
+        if (typeof input !== "object" || input === null || !("prompt" in input) || typeof input.prompt !== "string") {
+            throw new Error("invalid task input");
+        }
+        prompt = input.prompt.trim() || undefined;
+    }
+    catch {
+        console.error("Trinity: task input must be a JSON object with a string prompt on stdin.");
+        process.exitCode = 1;
+        return;
+    }
+    const env = { ...process.env, CLAUDE_PLUGIN_DATA: process.env.CLAUDE_PLUGIN_DATA ?? process.argv[2] };
     const dataDir = claudeCodeDialect.dataDir(env);
     const cfg = dataDir ? loadConfig(dataDir) : null;
     if (!dataDir || !cfg) {
@@ -46,7 +61,6 @@ async function main() {
         console.log("Trinity: this repository is not enabled for capture, so there is no task context to pull.");
         return;
     }
-    const prompt = process.argv[2]?.trim() || undefined;
     try {
         const answer = await fetchSessionContext(cfg, { repo: route.canonicalRepo, branch: currentBranch(cwd) ?? "", prompt }, REQUEST_TIMEOUT_MS);
         console.log(describeCandidates(answer?.candidates ?? []));

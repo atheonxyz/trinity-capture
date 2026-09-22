@@ -38,7 +38,7 @@ Cursor waits for the browser approval, stores its credential in the operating sy
 3. Generate a Claude Code pairing code from Trinity, then run `/trinity:connect <code>`.
 4. Exit Claude Code and start a new session in an enabled repository.
 
-In an enabled repository, a session opens with bounded Trinity task context for the branch: status, priority, due and milestone signals, recent task activity, and open resolutions when available. Claude Code refreshes that context from the first prompt when the branch names nothing and after a branch switch. `/trinity:task [what you are working on]` asks at any point.
+In an enabled repository, a session opens with bounded Trinity task context for the branch. Claude Code refreshes that context from the first prompt when the branch names nothing and after a branch switch. `/trinity:task [what you are working on]` asks at any point.
 
 ### Codex
 
@@ -58,6 +58,51 @@ Codex task in an enabled repository. No additional pairing code is needed.
 In an enabled repository, Codex receives the same bounded task context at
 `SessionStart`, from the first prompt when the branch names nothing, and after a
 branch switch. The context uses Codex's native `additionalContext` hook output.
+
+## Update an existing installation
+
+The task-context release uses these plugin versions:
+
+| Host | Version | After updating |
+| --- | --- | --- |
+| Claude Code | `0.2.10` | Exit Claude Code and start a new session. |
+| Codex | `0.3.12` | Check the updated hooks, then start a new task. |
+| Cursor | `0.3.5` | Reload Cursor and start a new Agent conversation. |
+
+Update through the installation's existing source and verify the installed version.
+Each host's catalog publishes separately; a version in this repository does not mean
+it is already available in that catalog. Preserve the existing plugin identity, data
+directory, and saved pairing. Updating does not require a new pairing code or another
+Trinity setup flow.
+
+For Codex, run the installed plugin's
+`node "<pluginRoot>/dist/codex-hook-setup.js" check <codex-executable>` after updating,
+using the same host and `CODEX_HOME`. Follow the hook-check steps in
+[the connection skill](codex/skills/trinity-connect/SKILL.md), including any required
+execution access. Reuse valid approvals; if the check returns `approval_required`,
+show the changed hook definitions and obtain explicit user approval before running
+the helper's `approve` command. Stop if hooks are disabled or blocked. Once the check
+returns `ready`, keep the saved pairing and start a new task; do not exchange a code.
+
+You can ask your coding agent:
+
+> Update my existing Trinity Capture plugin through its current installation source
+> to at least Claude Code 0.2.10, Codex 0.3.12, or Cursor 0.3.5, as appropriate for my
+> host. Preserve its identity, data directory, and saved pairing, and verify the
+> installed version. For Codex, check the updated hooks and ask me to approve changed
+> definitions. Tell me the final restart or new-session step.
+
+## Task context
+
+With the current backend, automatic context includes up to three likely tasks with
+their titles, status, and priority. The lookup uses the enabled repository and branch,
+plus a prompt when the host supports it. Claude Code and Codex refresh as described
+above; Cursor fetches at session start only. Lookups do not change tasks, and a failed
+lookup does not stop capture.
+
+The plugin can also render due dates, milestone signals, recent activity, and open
+resolutions when an enriched backend returns them. Updating the plugin alone does
+not enable those richer fields.
 
 ## What leaves your device
 
