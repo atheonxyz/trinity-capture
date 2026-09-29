@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "trinity": {
+      "command": "node",
+      "args": ["${CURSOR_PLUGIN_ROOT}/dist/cursor-mcp.js"],
+      "env": { "CURSOR_PLUGIN_ROOT": "${CURSOR_PLUGIN_ROOT}" }
+    }
+  }
+}

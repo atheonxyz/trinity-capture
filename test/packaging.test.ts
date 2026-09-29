@@ -13,10 +13,12 @@ import { hostname, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { saveConfig, savePolicy } from "../src/config.js";
 import { activationStatus, markPairedAwaitingNewSession } from "../src/activation.js";
+import { answerJson, runMcpBinary, startDoor, toolsListResult } from "./helpers/mcp-door.js";
 
 // pnpm test always runs from the repository root.
 const hookBin = join(process.cwd(), "claude-code", "dist", "claude-hook.js");
 const connectBin = join(process.cwd(), "claude-code", "dist", "connect.js");
+const mcpBin = join(process.cwd(), "claude-code", "dist", "claude-mcp.js");
 const dialectStdinPath = join(process.cwd(), "test", "testdata", "dialect-SessionStart.json");
 
 function gitEnv(): NodeJS.ProcessEnv {
@@ -315,4 +317,46 @@ test("the connect command is manual-only and passes its pairing code and persist
   assert.match(command, /^disable-model-invocation: true$/m);
   assert.match(command, /dist\/connect\.js" "\$pairing_code" "\$\{CLAUDE_PLUGIN_DATA\}"/);
   assert.doesNotMatch(command, /\$ARGUMENTS|\$[0-9]/);
+});
+
+const initialize = { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } } };
+const initialized = { jsonrpc: "2.0", method: "notifications/initialized" };
+const listTools = { jsonrpc: "2.0", id: 2, method: "tools/list" };
+
+test(".mcp.json declares the trinity server at the committed proxy and passes the data directory through", () => {
+  const manifest = JSON.parse(readFileSync(join(process.cwd(), "claude-code", ".mcp.json"), "utf8")) as {
+    mcpServers: Record<string, { command: string; args: string[]; env?: Record<string, string> }>;
+  };
+  const server = manifest.mcpServers.trinity;
+  assert.ok(server, ".mcp.json declares no trinity server");
+  assert.equal(server.command, "node");
+  assert.deepEqual(server.args, ["${CLAUDE_PLUGIN_ROOT}/dist/claude-mcp.js"]);
+  assert.deepEqual(server.env, { CLAUDE_PLUGIN_DATA: "${CLAUDE_PLUGIN_DATA}" });
+  assert.ok(existsSync(mcpBin), `${mcpBin} is missing — run pnpm build:plugin and commit the output`);
+});
+
+test("the committed MCP proxy answers the handshake unpaired, lists a paired door's tools, and prints no token", async () => {
+  const door = await startDoor((incoming, res) => answerJson(res, toolsListResult(incoming.body.id, ["get_task", "list_milestones"])));
+  try {
+    const unpaired = await runMcpBinary(mcpBin, { ...process.env, CLAUDE_PLUGIN_DATA: mkdtempSync(join(tmpdir(), "trinity-pkg-mcp-")) }, [initialize, initialized, listTools]);
+    assert.equal(unpaired.exitCode, 0);
+    assert.equal(unpaired.stderr, "");
+    assert.deepEqual(unpaired.answers.map((answer) => answer.id).sort(), [1, 2]);
+    assert.deepEqual(unpaired.answers.find((answer) => answer.id === 2), { jsonrpc: "2.0", id: 2, result: { tools: [] } });
+    assert.equal(door.requests.length, 0);
+
+    // The desktop app's "inline" directory is unpaired while the CLI's
+    // marketplace sibling holds the device: the proxy follows the hooks there.
+    const dirs = splitInstall({ inline: null, marketplace: "dev1" });
+    saveConfig(dirs.marketplace, { token: "secret-device-token", ingestUrl: door.ingestUrl, deviceId: "dev1", mcpUrl: door.mcpUrl });
+    const paired = await runMcpBinary(mcpBin, { ...process.env, CLAUDE_PLUGIN_DATA: dirs.inline }, [initialize, initialized, listTools]);
+    assert.equal(paired.exitCode, 0);
+    assert.equal(paired.stderr, "");
+    assert.deepEqual(paired.answers.find((answer) => answer.id === 2), toolsListResult(2, ["get_task", "list_milestones"]));
+    assert.equal(door.requests.length, 1);
+    assert.equal(door.requests[0].authorization, "Bearer secret-device-token");
+    assert.ok(!paired.stdout.includes("secret-device-token"), "the token must reach the door alone");
+  } finally {
+    await door.close();
+  }
 });

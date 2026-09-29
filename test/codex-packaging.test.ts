@@ -11,12 +11,15 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, statSync } from "no
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { saveConfig, savePolicy } from "../src/config.js";
-import { writePendingConfig, pendingConfigPath, targetKeyForPluginData } from "../src/codex-connect.js";
+import { loadConfig, saveConfig, savePolicy } from "../src/config.js";
+import { writePendingConfig, pendingConfigPath, targetKey, targetKeyForPluginData } from "../src/codex-connect.js";
+import { codexDataDirFromInstall } from "../src/codex-mcp.js";
 import { activationStatus } from "../src/activation.js";
+import { answerJson, runMcpBinary, startDoor, toolsListResult } from "./helpers/mcp-door.js";
 
 // pnpm test always runs from the repository root.
 const hookBin = join(process.cwd(), "codex", "dist", "codex-hook.js");
+const mcpBin = join(process.cwd(), "codex", "dist", "codex-mcp.js");
 const connectBin = join(process.cwd(), "codex", "dist", "codex-connect.js");
 const setupBin = join(process.cwd(), "codex", "dist", "codex-hook-setup.js");
 const fixturePath = join(process.cwd(), "test", "testdata", "codex_session.jsonl");
@@ -281,4 +284,52 @@ test("uninstall: hooks.json and the connect skill reference nothing outside the 
   assert.match(skillRaw, /dist\/codex-hook-setup\.js/);
   assert.doesNotMatch(skillRaw, /codex-connect\.js" <pairing-code> trinity-capture@trinity/);
   assert.doesNotMatch(skillRaw, /\/Users\/|\/home\//, "the connect skill must not embed an absolute local path");
+});
+
+const initialize = { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "0" } } };
+const listTools = { jsonrpc: "2.0", id: 2, method: "tools/list" };
+
+test(".mcp.json declares the trinity server relative to the plugin root, with no variable Codex would leave unexpanded", () => {
+  const manifest = JSON.parse(readFileSync(join(process.cwd(), "codex", ".mcp.json"), "utf8")) as {
+    mcpServers: Record<string, { command: string; args: string[]; cwd?: string; default_tools_approval_mode?: string }>;
+  };
+  const server = manifest.mcpServers.trinity;
+  assert.ok(server, ".mcp.json declares no trinity server");
+  assert.equal(server.command, "node");
+  assert.deepEqual(server.args, ["dist/codex-mcp.js"]);
+  assert.equal(server.cwd, ".", "only a relative cwd resolves against the plugin root");
+  assert.equal(server.default_tools_approval_mode, "approve", "codex exec refuses a tool call that would need approval");
+  assert.ok(existsSync(resolve(process.cwd(), "codex", server.cwd, server.args[0])), "the declared entry must be the committed build");
+  for (const value of [server.command, ...server.args]) assert.doesNotMatch(value, /\$\{|\/Users\/|\/home\//, `Codex substitutes nothing in .mcp.json: ${value}`);
+});
+
+test("the proxy derives Codex's data directory from its own install path, under the key the connect skill writes", () => {
+  const home = join(tmpdir(), "codex-home");
+  const derived = codexDataDirFromInstall(join(home, "plugins", "cache", "trinity", "trinity-capture", "0.3.13", "dist", "codex-mcp.js"));
+  assert.equal(derived, join(home, "plugins", "data", "trinity-capture-trinity"));
+  assert.equal(targetKeyForPluginData(derived ?? ""), targetKey("trinity-capture@trinity"), "the pending file the skill writes is the one the proxy promotes");
+  assert.equal(codexDataDirFromInstall(mcpBin), null, "a checkout is not an install");
+  assert.equal(codexDataDirFromInstall(join(home, "plugins", "elsewhere", "trinity", "trinity-capture", "0.3.13", "dist", "codex-mcp.js")), null);
+  assert.equal(codexDataDirFromInstall(join(home, "plugins", "cache", "trinity", "trinity-capture", "0.3.13", "codex-mcp.js")), null);
+});
+
+test("the committed proxy promotes a pending pairing before its first read, then lists the door's tools with the promoted token", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "trinity-codex-pkg-data-"));
+  const codexHome = mkdtempSync(join(tmpdir(), "trinity-codex-pkg-home-"));
+  const key = targetKeyForPluginData(dataDir);
+  const door = await startDoor((incoming, res) => answerJson(res, toolsListResult(incoming.body.id, ["get_task"])));
+  try {
+    writePendingConfig(codexHome, { token: "secret-device-token", ingestUrl: door.ingestUrl, deviceId: "dev1", mcpUrl: door.mcpUrl }, key);
+    const run = await runMcpBinary(mcpBin, { ...process.env, TRINITY_CAPTURE_DATA: dataDir, CODEX_HOME: codexHome, TRINITY_BASE_URL: door.origin }, [initialize, listTools]);
+    assert.equal(run.exitCode, 0);
+    assert.equal(run.stderr, "");
+    assert.ok(!existsSync(pendingConfigPath(codexHome, key)), "the proxy must run the hooks' promotion before reading the config");
+    assert.equal(loadConfig(dataDir)?.mcpUrl, door.mcpUrl, "the promoted config keeps the tools address the exchange answered");
+    assert.equal(activationStatus(dataDir), "paired-awaiting-new-session");
+    assert.deepEqual(run.answers.find((answer) => answer.id === 2), toolsListResult(2, ["get_task"]));
+    assert.equal(door.requests[0]?.authorization, "Bearer secret-device-token");
+    assert.ok(!run.stdout.includes("secret-device-token"), "the token must reach the door alone");
+  } finally {
+    await door.close();
+  }
 });

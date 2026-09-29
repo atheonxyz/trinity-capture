@@ -21,8 +21,10 @@ pnpm build:plugin-cursor   # regenerate cursor/dist/
 ## Structure
 
 - `src/` owns the shared capture core plus one `<product>-hook.ts` (Dialect table +
-  hook entrypoint) and, where a product's skill layer can't reach its own data
-  directory directly, one `<product>-connect.ts` per product.
+  hook entrypoint), one `<product>-mcp.ts` (the bundled MCP server's entrypoint over
+  the shared proxy in `mcp.ts`, resolving the data directory the way that product's
+  hooks do) and, where a product's skill layer can't reach its own data directory
+  directly, one `<product>-connect.ts` per product.
 - `claude-code/`, `codex/`, and `cursor/` are the three self-contained packaged plugins.
   Their marketplace manifests are separate because each host has its own plugin ecosystem.
 - `test/` covers the capture core, per-product packaging (dist execution, marketplace
@@ -31,7 +33,12 @@ pnpm build:plugin-cursor   # regenerate cursor/dist/
 
 ## Invariants
 
-- No daemon: every hook invocation is a short-lived process.
+- No daemon: every hook invocation is a short-lived process. The one long-lived process
+  is the MCP proxy (`src/mcp.ts`), owned by the host and started and stopped with the
+  plugin. It holds no state, reads the saved credential and `mcpUrl` fresh on every
+  request (config.json, then policy.json, refreshed once when neither names one, and
+  only on the ingest origin), answers the handshake locally so the host connects
+  offline or unpaired, and never logs or echoes the token.
 - Never forward local absolute paths, tool call bodies, or PII (Cursor's captured
   stream also carries `user_email`, which is never forwarded). Use an allowlist per
   event, never a strip list.
