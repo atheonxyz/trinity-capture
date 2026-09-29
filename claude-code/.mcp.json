@@ -2,8 +2,7 @@
   "mcpServers": {
     "trinity": {
       "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/claude-mcp.js"],
-      "env": { "CLAUDE_PLUGIN_DATA": "${CLAUDE_PLUGIN_DATA}" }
+      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/claude-mcp.js"]
     }
   }
 }

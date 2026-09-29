@@ -323,7 +323,7 @@ const initialize = { jsonrpc: "2.0", id: 1, method: "initialize", params: { prot
 const initialized = { jsonrpc: "2.0", method: "notifications/initialized" };
 const listTools = { jsonrpc: "2.0", id: 2, method: "tools/list" };
 
-test(".mcp.json declares the trinity server at the committed proxy and passes the data directory through", () => {
+test(".mcp.json declares the trinity server at the committed proxy and leaves the data directory to Claude Code", () => {
   const manifest = JSON.parse(readFileSync(join(process.cwd(), "claude-code", ".mcp.json"), "utf8")) as {
     mcpServers: Record<string, { command: string; args: string[]; env?: Record<string, string> }>;
   };
@@ -331,7 +331,7 @@ test(".mcp.json declares the trinity server at the committed proxy and passes th
   assert.ok(server, ".mcp.json declares no trinity server");
   assert.equal(server.command, "node");
   assert.deepEqual(server.args, ["${CLAUDE_PLUGIN_ROOT}/dist/claude-mcp.js"]);
-  assert.deepEqual(server.env, { CLAUDE_PLUGIN_DATA: "${CLAUDE_PLUGIN_DATA}" });
+  assert.equal(server.env, undefined, "Claude Code passes ${CLAUDE_PLUGIN_DATA} in a server's env literally and sets CLAUDE_PLUGIN_DATA itself");
   assert.ok(existsSync(mcpBin), `${mcpBin} is missing — run pnpm build:plugin and commit the output`);
 });
 
