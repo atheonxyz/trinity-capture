@@ -81,3 +81,30 @@ test("loading an existing credential repairs permissive legacy permissions", () 
   assert.equal(statSync(dataDir).mode & 0o777, 0o700);
   assert.equal(statSync(configPath).mode & 0o777, 0o600);
 });
+
+test("a changed tools address is the same device: nothing is retired and the policy stays", () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "trinity-config-data-"));
+  const config = { token: "token", ingestUrl: "https://ingest.example/api/v1/ingest/batches", deviceId: "device" };
+  saveConfig(dataDir, config);
+  savePolicy(dataDir, { etag: "policy", fetchedAt: Date.now(), ttlSeconds: 900, captureLevel: "metadata", workspaces: [] });
+  mkdirSync(join(dataDir, "outbox"));
+
+  saveConfig(dataDir, { ...config, mcpUrl: "https://ingest.example/api/v1/agent/mcp" });
+
+  assert.equal(loadPolicy(dataDir)?.etag, "policy");
+  assert.equal(existsSync(join(dataDir, "outbox")), true);
+  assert.equal(existsSync(join(dataDir, "retired")), false);
+  assert.deepEqual(loadConfig(dataDir), { ...config, mcpUrl: "https://ingest.example/api/v1/agent/mcp" });
+});
+
+test("loading a credential keeps a saved tools address and drops one that is not a string", () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "trinity-config-data-"));
+  const config = { token: "token", ingestUrl: "https://ingest.example/api/v1/ingest/batches", deviceId: "device" };
+  mkdirSync(dataDir, { recursive: true });
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ ...config, mcpUrl: 7 }));
+  assert.deepEqual(loadConfig(dataDir), config);
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ ...config, mcpUrl: "" }));
+  assert.deepEqual(loadConfig(dataDir), config);
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ ...config, mcpUrl: "https://ingest.example/api/v1/agent/mcp" }));
+  assert.equal(loadConfig(dataDir)?.mcpUrl, "https://ingest.example/api/v1/agent/mcp");
+});

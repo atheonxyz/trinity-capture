@@ -27,6 +27,7 @@ async function startServer(): Promise<TestServer> {
         token: "tok",
         deviceId: "dev1",
         ingestUrl: `http://127.0.0.1:${address.port}/api/v1/ingest/batches`,
+        mcpUrl: `http://127.0.0.1:${address.port}/api/v1/agent/mcp`,
       }));
       return;
     }
@@ -76,6 +77,7 @@ test("pairing fetches the initial policy before reporting the device connected",
     assert.deepEqual(server.requests, ["POST /api/v1/devices/exchange", "GET /api/v1/ingest/policy"]);
     assert.equal(existsSync(join(dataDir, "policy.json")), true);
     assert.equal(activationStatus(dataDir), "paired-awaiting-new-session");
+    assert.equal(loadConfig(dataDir)?.mcpUrl, `${server.baseUrl}/api/v1/agent/mcp`, "the tools address the exchange answered is saved with the pairing");
   } finally {
     await server.close();
   }

@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { hostname, platform } from "node:os";
 
 import type { DeviceConfig } from "./config.js";
+import { optionalUrl } from "./config.js";
 import { REQUEST_TIMEOUT_MS } from "./send.js";
 
 type DeviceAuthorization = {
@@ -84,12 +85,14 @@ export async function exchangeDeviceAuthorization(
       : `Unable to finish Trinity authorization (${response.status}).`);
   }
   const body: unknown = await response.json();
+  const mcpUrl = optionalUrl(field(body, "mcpUrl"));
   return {
     status: "connected",
     config: {
       token: requiredString(body, "token"),
       deviceId: requiredString(body, "deviceId"),
       ingestUrl: requiredString(body, "ingestUrl"),
+      ...(mcpUrl === undefined ? {} : { mcpUrl }),
     },
   };
 }

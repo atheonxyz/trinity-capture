@@ -1,5 +1,5 @@
 import { hostname } from "node:os";
-import { loadConfig, saveConfig } from "./config.js";
+import { loadConfig, optionalUrl, saveConfig } from "./config.js";
 import type { DeviceConfig } from "./config.js";
 import { activationStatus, markPairedAwaitingNewSession } from "./activation.js";
 import { isPolicyFresh } from "./gate.js";
@@ -34,8 +34,9 @@ export async function exchange(baseUrl: string, code: string, machineId: Machine
         : `Exchange failed: ${res.status}`,
     );
   }
-  const body = (await res.json()) as { token: string; deviceId: string; ingestUrl: string };
-  return { token: body.token, ingestUrl: body.ingestUrl, deviceId: body.deviceId };
+  const body = (await res.json()) as { token: string; deviceId: string; ingestUrl: string; mcpUrl?: unknown };
+  const mcpUrl = optionalUrl(body.mcpUrl);
+  return { token: body.token, ingestUrl: body.ingestUrl, deviceId: body.deviceId, ...(mcpUrl === undefined ? {} : { mcpUrl }) };
 }
 
 async function main(): Promise<void> {

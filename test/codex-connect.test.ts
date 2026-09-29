@@ -161,6 +161,25 @@ test("promotion rejects a pending config for an untrusted ingest origin", async 
   assert.ok(!existsSync(join(pluginData, "config.json")));
 });
 
+test("promotion carries the tools address only when it shares the ingest origin", async () => {
+  const base = { token: "tok", ingestUrl: "https://api.example/api/v1/ingest/batches", deviceId: "dev1" };
+  for (const [mcpUrl, kept] of [
+    ["https://api.example/api/v1/agent/mcp", true],
+    ["https://elsewhere.example/api/v1/agent/mcp", false],
+    ["not a url", false],
+  ] as const) {
+    const home = tmpHome();
+    const pluginData = tmpPluginData();
+    writePendingConfig(home, { ...base, mcpUrl });
+    saveFreshPolicy(pluginData);
+
+    await promotePendingConfig(home, pluginData, "https://api.example");
+
+    assert.ok(!existsSync(pendingConfigPath(home)), `${mcpUrl}: the pairing itself is promoted either way`);
+    assert.deepEqual(loadConfig(pluginData), kept ? { ...base, mcpUrl } : base, mcpUrl);
+  }
+});
+
 test("promotion accepts the staging dashboard and API origin pair", async () => {
   const home = tmpHome();
   const pluginData = tmpPluginData();

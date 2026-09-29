@@ -6,6 +6,10 @@ export interface DeviceConfig {
   token: string;
   ingestUrl: string;
   deviceId: string;
+  // Where the device's read-only agent tools are served (the MCP proxy's
+  // door). The server states it at pairing and in the policy document; the
+  // plugin never derives it from ingestUrl.
+  mcpUrl?: string;
 }
 
 export interface Policy {
@@ -13,7 +17,22 @@ export interface Policy {
   fetchedAt: number;
   ttlSeconds: number;
   captureLevel: "metadata";
+  mcpUrl?: string;
   workspaces: { canonicalRepo: string; githubRepositoryId?: number; aliases: string[]; route: string }[];
+}
+
+export function optionalUrl(value: unknown): string | undefined {
+  return typeof value === "string" && value !== "" ? value : undefined;
+}
+
+// A malformed URL shares no origin; it never throws past this check.
+export function sameOrigin(url: string, origin: string): boolean {
+  try {
+    return new URL(url).origin === origin;
+  } catch (error) {
+    if (error instanceof TypeError) return false;
+    throw error;
+  }
 }
 
 function readJSON<T>(path: string): T | null {
@@ -47,9 +66,12 @@ export function loadConfig(dir: string): DeviceConfig | null {
   } catch {
     return null;
   }
-  return cfg;
+  const mcpUrl = optionalUrl(cfg.mcpUrl);
+  return { token: cfg.token, ingestUrl: cfg.ingestUrl, deviceId: cfg.deviceId, ...(mcpUrl === undefined ? {} : { mcpUrl }) };
 }
 
+// The device identity is the credential and where it ingests; a changed
+// mcpUrl is the same device told a new address, never a re-pair.
 export function sameConfig(left: DeviceConfig, right: DeviceConfig): boolean {
   return left.deviceId === right.deviceId && left.token === right.token && left.ingestUrl === right.ingestUrl;
 }

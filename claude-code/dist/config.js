@@ -1,6 +1,20 @@
 import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+export function optionalUrl(value) {
+    return typeof value === "string" && value !== "" ? value : undefined;
+}
+// A malformed URL shares no origin; it never throws past this check.
+export function sameOrigin(url, origin) {
+    try {
+        return new URL(url).origin === origin;
+    }
+    catch (error) {
+        if (error instanceof TypeError)
+            return false;
+        throw error;
+    }
+}
 function readJSON(path) {
     try {
         return JSON.parse(readFileSync(path, "utf8"));
@@ -34,8 +48,11 @@ export function loadConfig(dir) {
     catch {
         return null;
     }
-    return cfg;
+    const mcpUrl = optionalUrl(cfg.mcpUrl);
+    return { token: cfg.token, ingestUrl: cfg.ingestUrl, deviceId: cfg.deviceId, ...(mcpUrl === undefined ? {} : { mcpUrl }) };
 }
+// The device identity is the credential and where it ingests; a changed
+// mcpUrl is the same device told a new address, never a re-pair.
 export function sameConfig(left, right) {
     return left.deviceId === right.deviceId && left.token === right.token && left.ingestUrl === right.ingestUrl;
 }
