@@ -16,6 +16,8 @@
     "src/hook-core.ts",
     "src/claude-hook.ts",
     "src/connect.ts",
-    "src/session-context.ts"
+    "src/session-context.ts",
+    "src/mcp.ts",
+    "src/claude-mcp.ts"
   ]
 }
