@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { loadConfig, saveConfig, savePolicy } from "../src/config.js";
 import { writePendingConfig, pendingConfigPath, targetKey, targetKeyForPluginData } from "../src/codex-connect.js";
-import { codexDataDirFromInstall } from "../src/codex-mcp.js";
+import { codexDataDirFromInstall, codexHomeFromInstall, codexMcpDataDir } from "../src/codex-mcp.js";
 import { activationStatus } from "../src/activation.js";
 import { answerJson, runMcpBinary, startDoor, toolsListResult } from "./helpers/mcp-door.js";
 
@@ -308,9 +308,25 @@ test("the proxy derives Codex's data directory from its own install path, under 
   const derived = codexDataDirFromInstall(join(home, "plugins", "cache", "trinity", "trinity-capture", "0.3.13", "dist", "codex-mcp.js"));
   assert.equal(derived, join(home, "plugins", "data", "trinity-capture-trinity"));
   assert.equal(targetKeyForPluginData(derived ?? ""), targetKey("trinity-capture@trinity"), "the pending file the skill writes is the one the proxy promotes");
+  assert.equal(codexHomeFromInstall(join(home, "plugins", "cache", "trinity", "trinity-capture", "0.3.13", "dist", "codex-mcp.js")), home);
   assert.equal(codexDataDirFromInstall(mcpBin), null, "a checkout is not an install");
+  assert.equal(codexHomeFromInstall(mcpBin), null);
   assert.equal(codexDataDirFromInstall(join(home, "plugins", "elsewhere", "trinity", "trinity-capture", "0.3.13", "dist", "codex-mcp.js")), null);
   assert.equal(codexDataDirFromInstall(join(home, "plugins", "cache", "trinity", "trinity-capture", "0.3.13", "codex-mcp.js")), null);
+});
+
+test("with no CODEX_HOME or PLUGIN_DATA, as Codex starts an MCP server, the proxy promotes the pairing from the home its install path names", async () => {
+  const home = mkdtempSync(join(tmpdir(), "trinity-codex-install-home-"));
+  const scriptPath = join(home, "plugins", "cache", "trinity", "trinity-capture", "0.3.13", "dist", "codex-mcp.js");
+  const door = await startDoor((incoming, res) => answerJson(res, toolsListResult(incoming.body.id, ["get_task"])));
+  try {
+    writePendingConfig(home, { token: "secret-device-token", ingestUrl: door.ingestUrl, deviceId: "dev1", mcpUrl: door.mcpUrl }, targetKey("trinity-capture@trinity"));
+    const dataDir = await codexMcpDataDir({ TRINITY_BASE_URL: door.origin }, scriptPath);
+    assert.equal(dataDir, join(home, "plugins", "data", "trinity-capture-trinity"));
+    assert.equal(loadConfig(dataDir ?? "")?.mcpUrl, door.mcpUrl, "the pending pairing under the derived home was promoted");
+  } finally {
+    await door.close();
+  }
 });
 
 test("the committed proxy promotes a pending pairing before its first read, then lists the door's tools with the promoted token", async () => {

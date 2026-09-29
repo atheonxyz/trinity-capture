@@ -12,7 +12,7 @@ import { runProxy } from "./mcp.js";
 // $CODEX_HOME/plugins/cache/<marketplace>/<plugin>/<version>/, and Codex
 // keys its data directory $CODEX_HOME/plugins/data/<plugin>-<marketplace>.
 // Anything else (a checkout, a copy) names no directory and stays unpaired.
-export function codexDataDirFromInstall(scriptPath) {
+function installedPlugins(scriptPath) {
     const version = dirname(dirname(scriptPath));
     const plugin = dirname(version);
     const marketplace = dirname(plugin);
@@ -20,14 +20,25 @@ export function codexDataDirFromInstall(scriptPath) {
     const plugins = dirname(cache);
     if (basename(dirname(scriptPath)) !== "dist" || basename(cache) !== "cache" || basename(plugins) !== "plugins")
         return null;
-    return join(plugins, "data", `${basename(plugin)}-${basename(marketplace)}`);
+    return { plugins, key: `${basename(plugin)}-${basename(marketplace)}` };
+}
+export function codexDataDirFromInstall(scriptPath) {
+    const install = installedPlugins(scriptPath);
+    return install === null ? null : join(install.plugins, "data", install.key);
+}
+// Codex starts MCP servers without CODEX_HOME, so the home holding a pending
+// pairing is read off the install path as well.
+export function codexHomeFromInstall(scriptPath) {
+    const install = installedPlugins(scriptPath);
+    return install === null ? null : dirname(install.plugins);
 }
 export async function codexMcpDataDir(env, scriptPath) {
     const dataDir = env.TRINITY_CAPTURE_DATA ?? env.PLUGIN_DATA ?? codexDataDirFromInstall(scriptPath);
     if (dataDir === null)
         return null;
+    const home = env.CODEX_HOME ?? codexHomeFromInstall(scriptPath) ?? codexHome(env);
     try {
-        await promotePendingConfig(codexHome(env), dataDir, env.TRINITY_BASE_URL ?? DEFAULT_BASE_URL);
+        await promotePendingConfig(home, dataDir, env.TRINITY_BASE_URL ?? DEFAULT_BASE_URL);
     }
     catch (error) {
         if (!(error instanceof Error))
