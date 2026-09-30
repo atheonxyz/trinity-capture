@@ -110,8 +110,7 @@ not enable those richer fields.
 
 Each plugin bundles an MCP server named `trinity`. Once the machine is paired, the
 coding agent can call Trinity's read-only tools: `get_task`, `find_tasks`,
-`suggest_tasks`, `get_task_context`, `read_source`, `get_milestone`, and
-`list_milestones`. They read the workspace the device is paired with and change
+`get_task_context`, `read_source`, `get_milestone`, and `list_milestones`. They read the workspace the device is paired with and change
 nothing. Installing the plugin is the whole setup; no host configuration file ever
 holds a Trinity secret.
 
