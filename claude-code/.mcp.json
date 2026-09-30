@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "trinity": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/claude-mcp.js"]
+    }
+  }
+}

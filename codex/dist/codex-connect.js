@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { DEFAULT_BASE_URL, exchange, supportsNodeVersion } from "./connect.js";
 import { activationStatus, markPairedAwaitingNewSession } from "./activation.js";
-import { loadConfig, loadPolicy, saveConfig } from "./config.js";
+import { loadConfig, loadPolicy, optionalUrl, sameOrigin, saveConfig } from "./config.js";
 import { isPolicyFresh } from "./gate.js";
 import { isMainModule } from "./main-module.js";
 import { refreshPolicy } from "./send.js";
@@ -66,18 +66,24 @@ function parseTrustedDeviceConfig(value, baseUrl) {
         return null;
     if (!("ingestUrl" in value) || typeof value.ingestUrl !== "string")
         return null;
+    let mcpUrl;
     try {
         const ingest = new URL(value.ingestUrl);
         const base = new URL(baseUrl);
         if ((ingest.origin !== base.origin && !TRINITY_INGEST_ORIGINS.has(ingest.origin)) || !ingest.pathname.endsWith("/api/v1/ingest/batches"))
             return null;
+        // The tools address rides along only on the ingest origin: the token is
+        // that origin's and the pending file is the one record a skill can write.
+        const candidate = "mcpUrl" in value ? optionalUrl(value.mcpUrl) : undefined;
+        if (candidate !== undefined && sameOrigin(candidate, ingest.origin))
+            mcpUrl = candidate;
     }
     catch (error) {
         if (error instanceof TypeError)
             return null;
         throw error;
     }
-    return { token: value.token, ingestUrl: value.ingestUrl, deviceId: value.deviceId };
+    return { token: value.token, ingestUrl: value.ingestUrl, deviceId: value.deviceId, ...(mcpUrl === undefined ? {} : { mcpUrl }) };
 }
 // Promotes a pending record into PLUGIN_DATA/config.json — the same file
 // config.ts's loadConfig/saveConfig already read and write for every

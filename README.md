@@ -4,11 +4,13 @@ Trinity Capture connects Claude Code, Codex, and Cursor sessions to [Trinity](ht
 
 The clients are deliberately small:
 
-- No daemon or background service.
+- No daemon or background service of their own. The one long-lived process is the bundled MCP server, which the host starts and stops with the plugin.
 - No repository configuration or committed hooks.
 - No uploads from repositories that are not enabled in Trinity.
 - No tool input or output bodies, reasoning text, absolute local paths, or vendor account email fields.
 - A local outbox retries transient delivery failures without blocking the coding agent.
+
+Installing a plugin also gives the coding agent Trinity's read-only tools over the paired workspace, with no further setup and no secret written into any host configuration file. See [Agent tools](#agent-tools).
 
 ## Install
 
@@ -61,13 +63,13 @@ branch switch. The context uses Codex's native `additionalContext` hook output.
 
 ## Update an existing installation
 
-The task-context release uses these plugin versions:
+The agent-tools release uses these plugin versions:
 
 | Host | Version | After updating |
 | --- | --- | --- |
-| Claude Code | `0.2.10` | Exit Claude Code and start a new session. |
-| Codex | `0.3.12` | Check the updated hooks, then start a new task. |
-| Cursor | `0.3.5` | Reload Cursor and start a new Agent conversation. |
+| Claude Code | `0.2.11` | Exit Claude Code and start a new session. |
+| Codex | `0.3.13` | Check the updated hooks, then start a new task. |
+| Cursor | `0.3.6` | Reload Cursor and start a new Agent conversation. |
 
 Update through the installation's existing source and verify the installed version.
 Each host's catalog publishes separately; a version in this repository does not mean
@@ -87,7 +89,7 @@ returns `ready`, keep the saved pairing and start a new task; do not exchange a 
 You can ask your coding agent:
 
 > Update my existing Trinity Capture plugin through its current installation source
-> to at least Claude Code 0.2.10, Codex 0.3.12, or Cursor 0.3.5, as appropriate for my
+> to at least Claude Code 0.2.11, Codex 0.3.13, or Cursor 0.3.6, as appropriate for my
 > host. Preserve its identity, data directory, and saved pairing, and verify the
 > installed version. For Codex, check the updated hooks and ask me to approve changed
 > definitions. Tell me the final restart or new-session step.
@@ -104,6 +106,34 @@ The plugin can also render due dates, milestone signals, recent activity, and op
 resolutions when an enriched backend returns them. Updating the plugin alone does
 not enable those richer fields.
 
+## Agent tools
+
+Each plugin bundles an MCP server named `trinity`. Once the machine is paired, the
+coding agent can call Trinity's read-only tools: `get_task`, `find_tasks`,
+`get_task_context`, `read_source`, `get_milestone`, and `list_milestones`. They read the workspace the device is paired with and change
+nothing. Installing the plugin is the whole setup; no host configuration file ever
+holds a Trinity secret.
+
+The server is a small proxy. It answers the MCP handshake locally, so the host
+connects even when the machine is offline or not yet paired, and forwards each tool
+request as one HTTPS request to the paired Trinity server's agent-tools address,
+authenticated with the saved device credential. That address is what Trinity sent
+at pairing or in the capture policy; the plugin never derives it, and it must share
+the origin the device ingests to. The saved connection is re-read on every request,
+so a new pairing or a rotated credential takes effect without restarting the host.
+
+Each host loads it from the plugin itself:
+
+- Claude Code reads `.mcp.json` at the plugin root and passes the plugin's data directory to the server.
+- Codex reads `.mcp.json` at the plugin root and runs the server from the plugin directory; the server finds its data directory from its own install path.
+- Cursor reads `mcp.json` at the plugin root, named by the plugin manifest.
+
+Before pairing, or when the paired Trinity server has not yet offered an
+agent-tools address, the tool list is empty and a call reports that Trinity is not
+connected on this machine. A revoked or replaced device credential makes a call
+report that the device needs to be paired again. A network failure fails the one
+call after a bounded wait. None of this affects capture.
+
 ## What leaves your device
 
 Capture is allowlist-first. The plugin reads the current Git remote locally and stays silent unless it matches a repository enabled in one of your Trinity projects.
@@ -119,6 +149,7 @@ For a matching repository, Trinity receives:
 - Tool names and call identifiers, never tool arguments or results.
 - Session lifecycle timestamps and completion reasons.
 - In Claude Code and Codex, once per session or branch, the tasks the session likely relates to: a read-only request carrying the repository, branch, and, when supported, the first prompt. Cursor makes the same read at session start, where its hook contract can inject context, but does not make an unsupported prompt-time read. The response can include task identity, status, priority, due and milestone signals, recent task activity, and open resolutions; the agent receives a bounded rendering marked as workspace data rather than instructions.
+- The Trinity tool calls the coding agent chooses to make: the tool name and the arguments the agent supplies, such as a task code or a search phrase, sent with the device credential to the paired Trinity server only. The answer is shown to the agent and stored nowhere. The proxy sends nothing else from the session.
 
 Trinity does not receive unmatched repository identities, absolute paths, environment variables, tool bodies, reasoning text, or Cursor's `user_email` field. See [PRIVACY.md](PRIVACY.md) for the complete disclosure.
 
@@ -135,6 +166,8 @@ Each host invokes a short-lived Node.js hook process. The shared core:
 7. Appends the event to the local outbox before attempting delivery.
 
 Turn keys are minted locally and stored one file per vendor turn ID, so concurrent hook processes cannot overwrite one another. Network calls have bounded timeouts. Cursor and Codex use bounded synchronous drains at lifecycle boundaries; Claude Code uses detached hooks where supported.
+
+The MCP server is the one long-lived process: the host starts it with the plugin and ends it with the plugin. It holds no state of its own, re-reads the saved credential and agent-tools address for every request, and relays each tool call to Trinity as a single bounded HTTPS request.
 
 ## Credential storage
 

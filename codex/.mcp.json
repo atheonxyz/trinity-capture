@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "trinity": {
+      "command": "node",
+      "args": ["dist/codex-mcp.js"],
+      "cwd": ".",
+      "default_tools_approval_mode": "approve"
+    }
+  }
+}

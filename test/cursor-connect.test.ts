@@ -108,7 +108,7 @@ test("browser authorization opens Trinity and waits until approval before saving
       assert.deepEqual(JSON.parse(String(init?.body)), { deviceCode: "device-secret", hostname: hostname(), machineId: "b".repeat(64) });
       return exchanges === 1
         ? Response.json({ status: "pending" }, { status: 202 })
-        : Response.json({ token: "tok-browser", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev-browser" });
+        : Response.json({ token: "tok-browser", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev-browser", mcpUrl: "http://127.0.0.1:1/api/v1/agent/mcp" });
     }
     if (href.endsWith("/api/v1/ingest/policy")) {
       return Response.json({ etag: "policy-browser", ttlSeconds: 900, captureLevel: "metadata", workspaces: [] });
@@ -134,7 +134,7 @@ test("browser authorization opens Trinity and waits until approval before saving
   assert.deepEqual(shownCodes, ["A1B2-C3D4"]);
   assert.equal(exchanges, 2);
   const cfg = JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as { token: string; deviceId: string };
-  assert.deepEqual(cfg, { token: "tok-browser", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev-browser" });
+  assert.deepEqual(cfg, { token: "tok-browser", ingestUrl: "http://127.0.0.1:1/api/v1/ingest/batches", deviceId: "dev-browser", mcpUrl: "http://127.0.0.1:1/api/v1/agent/mcp" });
 });
 
 test("browser authorization rejects a verification URL outside Trinity", async () => {

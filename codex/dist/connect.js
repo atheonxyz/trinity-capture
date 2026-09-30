@@ -1,5 +1,5 @@
 import { hostname } from "node:os";
-import { loadConfig, saveConfig } from "./config.js";
+import { loadConfig, optionalUrl, saveConfig } from "./config.js";
 import { activationStatus, markPairedAwaitingNewSession } from "./activation.js";
 import { isPolicyFresh } from "./gate.js";
 import { isMainModule } from "./main-module.js";
@@ -29,7 +29,8 @@ export async function exchange(baseUrl, code, machineId = readMachineId) {
             : `Exchange failed: ${res.status}`);
     }
     const body = (await res.json());
-    return { token: body.token, ingestUrl: body.ingestUrl, deviceId: body.deviceId };
+    const mcpUrl = optionalUrl(body.mcpUrl);
+    return { token: body.token, ingestUrl: body.ingestUrl, deviceId: body.deviceId, ...(mcpUrl === undefined ? {} : { mcpUrl }) };
 }
 async function main() {
     if (!supportsNodeVersion(process.versions.node)) {
