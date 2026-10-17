@@ -68,8 +68,8 @@ The agent-tools release uses these plugin versions:
 | Host | Version | After updating |
 | --- | --- | --- |
 | Claude Code | `0.2.11` | Exit Claude Code and start a new session. |
-| Codex | `0.3.14` | Check the updated hooks, then start a new task. |
-| Cursor | `0.3.7` | Reload Cursor and start a new Agent conversation. |
+| Codex | `0.3.15` | Check the updated hooks, then start a new task. |
+| Cursor | `0.3.8` | Reload Cursor and start a new Agent conversation. |
 
 Update through the installation's existing source and verify the installed version.
 Each host's catalog publishes separately; a version in this repository does not mean
@@ -89,7 +89,7 @@ returns `ready`, keep the saved pairing and start a new task; do not exchange a 
 You can ask your coding agent:
 
 > Update my existing Trinity Capture plugin through its current installation source
-> to at least Claude Code 0.2.11, Codex 0.3.14, or Cursor 0.3.7, as appropriate for my
+> to at least Claude Code 0.2.11, Codex 0.3.15, or Cursor 0.3.8, as appropriate for my
 > host. Preserve its identity, data directory, and saved pairing, and verify the
 > installed version. For Codex, check the updated hooks and ask me to approve changed
 > definitions. Tell me the final restart or new-session step.
