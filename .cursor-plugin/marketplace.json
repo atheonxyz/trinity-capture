@@ -11,14 +11,14 @@
     {
       "name": "trinity-capture",
       "description": "Captures Cursor coding sessions into Trinity for allowlisted repositories.",
-      "version": "0.3.6",
+      "version": "0.3.7",
       "source": "./cursor",
       "author": { "name": "Trinity", "email": "hi@usetrinity.ai" },
       "homepage": "https://usetrinity.ai",
       "repository": "https://github.com/atheonxyz/trinity-capture",
       "license": "Apache-2.0",
       "keywords": ["coding sessions", "developer tools", "team context"],
-      "logo": "assets/trinity.svg",
+      "logo": "assets/trinity-mark.svg",
       "category": "Productivity"
     }
   ]

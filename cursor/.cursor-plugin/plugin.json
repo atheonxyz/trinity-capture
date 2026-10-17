@@ -1,7 +1,7 @@
 {
   "name": "trinity-capture",
   "description": "Captures Cursor coding sessions into Trinity for allowlisted repositories.",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "author": {
     "name": "Trinity",
     "email": "hi@usetrinity.ai"
@@ -10,7 +10,7 @@
   "repository": "https://github.com/atheonxyz/trinity-capture",
   "license": "Apache-2.0",
   "keywords": ["coding sessions", "developer tools", "team context"],
-  "logo": "assets/trinity.svg",
+  "logo": "assets/trinity-mark.svg",
   "hooks": "hooks/hooks.json",
   "mcpServers": "mcp.json",
   "commands": "commands"
