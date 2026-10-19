@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, platform } from "node:os";
 import { join } from "node:path";
 export function optionalUrl(value) {
     return typeof value === "string" && value !== "" ? value : undefined;
@@ -86,4 +87,17 @@ export function saveActivation(dir, value) {
 }
 export function saveGitHubRepositoryCache(dir, value) {
     writeJSON(dir, "github-repositories.json", value);
+}
+// One per-user directory the hooks, the MCP server and the connect script all reach, even under a sanitized environment.
+export function perUserDataDir(env, channel) {
+    if (env.TRINITY_CAPTURE_DATA)
+        return env.TRINITY_CAPTURE_DATA;
+    switch (platform()) {
+        case "darwin":
+            return join(homedir(), "Library", "Application Support", "Trinity Capture", channel);
+        case "win32":
+            return join(env.LOCALAPPDATA || join(homedir(), "AppData", "Local"), "Trinity Capture", channel);
+        default:
+            return join(env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "trinity-capture", channel);
+    }
 }

@@ -17,7 +17,7 @@ import { fetchSessionContext, refreshPolicy } from "./send.js";
 import type { SessionContextCandidate, SessionContextHandoff } from "./send.js";
 
 export interface Dialect {
-  tool: "claude_code" | "codex" | "cursor";
+  tool: "claude_code" | "codex" | "cursor" | "gemini_cli" | "copilot_cli";
   sessionId(event: string, payload: Record<string, unknown>): string | null;
   cwd(event: string, payload: Record<string, unknown>): string | null;
   vendorTurnId(event: string, payload: Record<string, unknown>): string | null;

@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "bash": "node \"$PLUGIN_ROOT/dist/copilot-hook.js\" sessionStart",
+        "powershell": "node \"$env:PLUGIN_ROOT/dist/copilot-hook.js\" sessionStart",
+        "timeoutSec": 5
+      }
+    ],
+    "userPromptSubmitted": [
+      {
+        "type": "command",
+        "bash": "node \"$PLUGIN_ROOT/dist/copilot-hook.js\" userPromptSubmitted",
+        "powershell": "node \"$env:PLUGIN_ROOT/dist/copilot-hook.js\" userPromptSubmitted",
+        "timeoutSec": 5
+      }
+    ],
+    "postToolUse": [
+      {
+        "type": "command",
+        "bash": "node \"$PLUGIN_ROOT/dist/copilot-hook.js\" postToolUse",
+        "powershell": "node \"$env:PLUGIN_ROOT/dist/copilot-hook.js\" postToolUse",
+        "timeoutSec": 5
+      }
+    ],
+    "agentStop": [
+      {
+        "type": "command",
+        "bash": "node \"$PLUGIN_ROOT/dist/copilot-hook.js\" agentStop",
+        "powershell": "node \"$env:PLUGIN_ROOT/dist/copilot-hook.js\" agentStop",
+        "timeoutSec": 5
+      }
+    ],
+    "sessionEnd": [
+      {
+        "type": "command",
+        "bash": "node \"$PLUGIN_ROOT/dist/copilot-hook.js\" sessionEnd",
+        "powershell": "node \"$env:PLUGIN_ROOT/dist/copilot-hook.js\" sessionEnd",
+        "timeoutSec": 5
+      }
+    ]
+  }
+}

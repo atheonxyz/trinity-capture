@@ -1,6 +1,6 @@
 # Trinity Capture
 
-Trinity Capture connects Claude Code, Codex, and Cursor sessions to [Trinity](https://usetrinity.ai), where teams can follow coding work alongside the rest of their project context.
+Trinity Capture connects Claude Code, Codex, Cursor, Gemini CLI, and GitHub Copilot CLI sessions to [Trinity](https://usetrinity.ai), where teams can follow coding work alongside the rest of their project context.
 
 The clients are deliberately small:
 
@@ -61,6 +61,49 @@ In an enabled repository, Codex receives the same bounded task context at
 `SessionStart`, from the first prompt when the branch names nothing, and after a
 branch switch. The context uses Codex's native `additionalContext` hook output.
 
+### Gemini CLI
+
+Gemini CLI installs an extension from a GitHub URL only when its manifest sits at the
+repository root, and this repository holds one plugin per host, so install the
+`gemini` directory from a clone:
+
+1. Run `git clone https://github.com/atheonxyz/trinity-capture.git`.
+2. Run `gemini extensions install ./trinity-capture/gemini` and accept the prompt.
+3. Generate a Gemini CLI pairing code from Trinity, start Gemini CLI, and run
+   `/trinity:connect <code>`. Gemini asks before it runs the connect script. You can
+   also run `node ~/.gemini/extensions/trinity-capture/dist/gemini-connect.js <code>`
+   in a terminal.
+4. Exit Gemini CLI and start a new session in an enabled repository.
+
+The extension registers its hooks in `gemini/hooks/hooks.json`. Gemini CLI hands each
+hook the session id, the prompt at `BeforeAgent`, the tool name at `AfterTool`, and the
+turn's final reply at `AfterAgent`. In an enabled repository, a session opens with the
+same bounded task context as Claude Code, refreshed from the first prompt when the
+branch names nothing, through Gemini's `hookSpecificOutput.additionalContext`.
+Gemini CLI does not wait for `SessionEnd`, so that event is only queued and leaves
+with the next turn.
+
+### GitHub Copilot CLI
+
+1. Run `copilot plugin marketplace add atheonxyz/trinity-capture`, then
+   `copilot plugin install trinity-capture@trinity`. You can also install the plugin
+   directly with `copilot plugin install atheonxyz/trinity-capture:copilot`.
+2. Generate a Copilot CLI pairing code from Trinity, start Copilot CLI, and ask it to
+   connect Trinity with that code. The bundled `trinity-connect` skill finds the
+   installed plugin and runs its connect script. You can also run
+   `node ~/.copilot/installed-plugins/trinity/trinity-capture/dist/copilot-connect.js <code>`
+   in a terminal.
+3. Exit Copilot CLI and start a new session in an enabled repository.
+
+Copilot CLI hands each hook the session id, the prompt at `userPromptSubmitted`, and
+the tool name at `postToolUse`. Its turn-end hook, `agentStop`, carries no reply text,
+only the path of a local transcript file whose format Copilot does not document, so
+the plugin captures no assistant reply for Copilot CLI and never reads or sends that
+file or its path. Task context arrives once, at `sessionStart`, through Copilot's
+`additionalContext`; Copilot drops the output of a prompt hook, so the plugin makes no
+prompt-time read. If you run Copilot CLI with its session sandbox on, grant the
+credential directory below in `sandbox.userPolicy` so the hooks can reach it.
+
 ## Update an existing installation
 
 The task handoff release uses these plugin versions:
@@ -70,6 +113,8 @@ The task handoff release uses these plugin versions:
 | Claude Code | `0.2.13` | Exit Claude Code and start a new session. |
 | Codex | `0.3.17` | Check the updated hooks, then start a new task. |
 | Cursor | `0.3.10` | Reload Cursor and start a new Agent conversation. |
+| Gemini CLI | `0.1.0` | Pull the clone, run `gemini extensions update trinity-capture`, then start a new session. |
+| GitHub Copilot CLI | `0.1.0` | Run `copilot plugin update trinity-capture`, then start a new session. |
 
 Update through the installation's existing source and verify the installed version.
 Each host's catalog publishes separately; a version in this repository does not mean
@@ -150,6 +195,8 @@ Each host loads it from the plugin itself:
 - Claude Code reads `.mcp.json` at the plugin root and passes the plugin's data directory to the server.
 - Codex reads `.mcp.json` at the plugin root and runs the server from the plugin directory; the server finds its data directory from its own install path.
 - Cursor reads `mcp.json` at the plugin root, named by the plugin manifest.
+- Gemini CLI reads the `mcpServers` entry of `gemini-extension.json`.
+- GitHub Copilot CLI reads `mcp.json` at the plugin root.
 
 Before pairing, or when the paired Trinity server has not yet offered an
 agent-tools address, the tool list is empty and a call reports that Trinity is not
@@ -167,14 +214,14 @@ The machine identity identifies an OS installation, not a physical device. Reins
 
 For a matching repository, Trinity receives:
 
-- The prompt and assistant response for each turn.
+- The prompt and assistant response for each turn. GitHub Copilot CLI sends the prompt only, because its hooks carry no reply.
 - The coding tool, model, branch, HEAD commit, dirty state, and bounded diff statistics.
-- Tool names and call identifiers, never tool arguments or results.
+- Tool names and, where the host supplies them, call identifiers, never tool arguments or results.
 - Session lifecycle timestamps and completion reasons.
-- In Claude Code and Codex, once per session or branch, the tasks the session likely relates to: a read-only request carrying the repository, branch, and, when supported, the first prompt. Cursor makes the same read at session start, where its hook contract can inject context, but does not make an unsupported prompt-time read. The response can include task identity, status, priority, due and milestone signals, recent task activity, and open resolutions; the agent receives a bounded rendering marked as workspace data rather than instructions.
+- In Claude Code and Codex, once per session or branch, the tasks the session likely relates to: a read-only request carrying the repository, branch, and, when supported, the first prompt. Gemini CLI reads the same way. Cursor and GitHub Copilot CLI make the same read at session start, where their hook contracts can inject context, but do not make an unsupported prompt-time read. The response can include task identity, status, priority, due and milestone signals, recent task activity, and open resolutions; the agent receives a bounded rendering marked as workspace data rather than instructions.
 - The Trinity tool calls the coding agent chooses to make: the tool name and the arguments the agent supplies, sent with the device credential to the paired Trinity server only. For a read that is a task code or a search phrase. For a write it is what the agent wrote: a task code, a progress line, a question, a pull request number, or a proposed task's title and description. Trinity stores what a write records, as the paired person's action. The answer is shown to the agent and stored nowhere on the device. The proxy sends nothing else from the session.
 
-Trinity does not receive unmatched repository identities, absolute paths, environment variables, tool bodies, reasoning text, or Cursor's `user_email` field. See [PRIVACY.md](PRIVACY.md) for the complete disclosure.
+Trinity does not receive unmatched repository identities, absolute paths, environment variables, tool bodies, reasoning text, transcript files or their paths, or Cursor's `user_email` field. See [PRIVACY.md](PRIVACY.md) for the complete disclosure.
 
 ## How it works
 
@@ -188,19 +235,19 @@ Each host invokes a short-lived Node.js hook process. The shared core:
 6. Filters the native hook payload through an event-specific allowlist.
 7. Appends the event to the local outbox before attempting delivery.
 
-Turn keys are minted locally and stored one file per vendor turn ID, so concurrent hook processes cannot overwrite one another. Network calls have bounded timeouts. Cursor and Codex use bounded synchronous drains at lifecycle boundaries; Claude Code uses detached hooks where supported.
+Turn keys are minted locally and stored one file per vendor turn ID, so concurrent hook processes cannot overwrite one another. Network calls have bounded timeouts. Cursor, Codex, Gemini CLI, and GitHub Copilot CLI use bounded synchronous drains at lifecycle boundaries, and none of them waits on a session-end event; Claude Code uses detached hooks where supported.
 
 The MCP server is the one long-lived process: the host starts it with the plugin and ends it with the plugin. It holds no state of its own, re-reads the saved credential and agent-tools address for every request, and relays each tool call to Trinity as a single bounded HTTPS request.
 
 ## Credential storage
 
-Claude Code and Codex provide plugin-specific data directories. Cursor does not, so Trinity Capture uses the operating system's per-user application-data location:
+Claude Code and Codex provide plugin-specific data directories. Cursor does not, and Gemini CLI and GitHub Copilot CLI do not offer one that their connect scripts can also reach, so Trinity Capture uses the operating system's per-user application-data location, one directory per host (`cursor`, `gemini`, or `copilot`):
 
-| Platform | Cursor credential directory |
+| Platform | Credential directory |
 | --- | --- |
-| macOS | `~/Library/Application Support/Trinity Capture/cursor` |
-| Linux | `${XDG_STATE_HOME:-~/.local/state}/trinity-capture/cursor` |
-| Windows | `%LOCALAPPDATA%\Trinity Capture\cursor` |
+| macOS | `~/Library/Application Support/Trinity Capture/<host>` |
+| Linux | `${XDG_STATE_HOME:-~/.local/state}/trinity-capture/<host>` |
+| Windows | `%LOCALAPPDATA%\Trinity Capture\<host>` |
 
 On POSIX systems, directories are mode `0700` and credential files are mode `0600`. `TRINITY_CAPTURE_DATA` overrides this location for development.
 
@@ -213,9 +260,11 @@ pnpm test
 pnpm build:plugin
 pnpm build:codex
 pnpm build:plugin-cursor
+pnpm build:gemini
+pnpm build:copilot
 ```
 
-The generated `claude-code/dist`, `codex/dist`, and `cursor/dist` directories are committed because installed plugins execute them directly. CI rebuilds all three and fails if committed output is stale.
+The generated `claude-code/dist`, `codex/dist`, `cursor/dist`, `gemini/dist`, and `copilot/dist` directories are committed because installed plugins execute them directly. CI rebuilds all five and fails if committed output is stale.
 
 To test Cursor locally, copy the plugin directory and reload Cursor:
 

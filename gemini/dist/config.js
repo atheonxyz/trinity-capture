@@ -1,0 +1,103 @@
+import { randomUUID } from "node:crypto";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { homedir, platform } from "node:os";
+import { join } from "node:path";
+export function optionalUrl(value) {
+    return typeof value === "string" && value !== "" ? value : undefined;
+}
+// A malformed URL shares no origin; it never throws past this check.
+export function sameOrigin(url, origin) {
+    try {
+        return new URL(url).origin === origin;
+    }
+    catch (error) {
+        if (error instanceof TypeError)
+            return false;
+        throw error;
+    }
+}
+function readJSON(path) {
+    try {
+        return JSON.parse(readFileSync(path, "utf8"));
+    }
+    catch {
+        return null;
+    }
+}
+function writeJSON(dir, name, value) {
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    chmodSync(dir, 0o700);
+    const path = join(dir, name);
+    const temporary = join(dir, `.${name}.${process.pid}.${randomUUID()}.tmp`);
+    try {
+        writeFileSync(temporary, JSON.stringify(value, null, 2), { encoding: "utf8", flag: "wx", mode: 0o600 });
+        renameSync(temporary, path);
+    }
+    finally {
+        rmSync(temporary, { force: true });
+    }
+}
+export function loadConfig(dir) {
+    const path = join(dir, "config.json");
+    const cfg = readJSON(path);
+    if (!cfg || !cfg.token || !cfg.ingestUrl || !cfg.deviceId)
+        return null;
+    try {
+        chmodSync(dir, 0o700);
+        chmodSync(path, 0o600);
+    }
+    catch {
+        return null;
+    }
+    const mcpUrl = optionalUrl(cfg.mcpUrl);
+    return { token: cfg.token, ingestUrl: cfg.ingestUrl, deviceId: cfg.deviceId, ...(mcpUrl === undefined ? {} : { mcpUrl }) };
+}
+// The device identity is the credential and where it ingests; a changed
+// mcpUrl is the same device told a new address, never a re-pair.
+export function sameConfig(left, right) {
+    return left.deviceId === right.deviceId && left.token === right.token && left.ingestUrl === right.ingestUrl;
+}
+export function isCurrentConfig(dir, cfg) {
+    const current = loadConfig(dir);
+    return current !== null && sameConfig(current, cfg);
+}
+export function saveConfig(dir, cfg) {
+    const existing = loadConfig(dir);
+    if (existing === null || !sameConfig(existing, cfg)) {
+        rmSync(join(dir, "policy.json"), { force: true });
+        rmSync(join(dir, "github-repositories.json"), { force: true });
+        const sources = ["outbox", "active-sessions", "turnkeys"].filter((name) => existsSync(join(dir, name)));
+        if (sources.length > 0) {
+            const retired = join(dir, "retired", randomUUID());
+            mkdirSync(retired, { recursive: true, mode: 0o700 });
+            for (const name of sources)
+                renameSync(join(dir, name), join(retired, name));
+        }
+    }
+    writeJSON(dir, "config.json", cfg);
+}
+export function loadPolicy(dir) {
+    return readJSON(join(dir, "policy.json"));
+}
+export function savePolicy(dir, policy) {
+    writeJSON(dir, "policy.json", policy);
+}
+export function saveActivation(dir, value) {
+    writeJSON(dir, "activation.json", value);
+}
+export function saveGitHubRepositoryCache(dir, value) {
+    writeJSON(dir, "github-repositories.json", value);
+}
+// One per-user directory the hooks, the MCP server and the connect script all reach, even under a sanitized environment.
+export function perUserDataDir(env, channel) {
+    if (env.TRINITY_CAPTURE_DATA)
+        return env.TRINITY_CAPTURE_DATA;
+    switch (platform()) {
+        case "darwin":
+            return join(homedir(), "Library", "Application Support", "Trinity Capture", channel);
+        case "win32":
+            return join(env.LOCALAPPDATA || join(homedir(), "AppData", "Local"), "Trinity Capture", channel);
+        default:
+            return join(env.XDG_STATE_HOME || join(homedir(), ".local", "state"), "trinity-capture", channel);
+    }
+}
