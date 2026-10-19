@@ -1,0 +1,13 @@
+{
+  "name": "trinity-capture",
+  "version": "0.1.0",
+  "description": "Captures Gemini CLI sessions into Trinity for allowlisted repositories.",
+  "mcpServers": {
+    "trinity": {
+      "command": "node",
+      "args": [
+        "${extensionPath}${/}dist${/}gemini-mcp.js"
+      ]
+    }
+  }
+}

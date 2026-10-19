@@ -1,6 +1,6 @@
 {
   "name": "trinity-capture",
-  "version": "0.3.15",
+  "version": "0.3.17",
   "private": true,
   "license": "Apache-2.0",
   "type": "module",
@@ -17,6 +17,8 @@
     "build:plugin": "tsc -p tsconfig.plugin.json",
     "build:plugin-cursor": "tsc -p tsconfig.plugin-cursor.json",
     "build:codex": "tsc -p tsconfig.codex-plugin.json",
+    "build:gemini": "tsc -p tsconfig.gemini.json",
+    "build:copilot": "tsc -p tsconfig.copilot.json",
     "test": "node --test dist-test/**/*.test.js"
   },
   "devDependencies": {

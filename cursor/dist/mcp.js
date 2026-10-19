@@ -56,7 +56,7 @@ function initializeResult(params) {
         protocolVersion: PROTOCOL_VERSIONS.includes(asked) ? asked : PROTOCOL_VERSIONS[0],
         capabilities: { tools: {} },
         serverInfo: { name: "trinity", title: "Trinity", version: "1" },
-        instructions: "Read-only tools over the Trinity workspace this machine is paired with: its tasks, milestones and their context.",
+        instructions: "These tools read the Trinity workspace this machine is paired with, and the write tools act as the paired person inside their projects.",
     };
 }
 async function readEventStream(body, id) {

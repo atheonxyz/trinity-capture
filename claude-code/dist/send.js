@@ -53,6 +53,27 @@ function isCandidate(value) {
     const record = value;
     return typeof record.taskId === "string" && typeof record.title === "string" && typeof record.status === "string";
 }
+function isHandoff(value) {
+    if (typeof value !== "object" || value === null)
+        return false;
+    const record = value;
+    return typeof record.taskId === "string" && typeof record.code === "string" && typeof record.title === "string" && typeof record.status === "string";
+}
+function toHandoff(record) {
+    const text = (value) => (typeof value === "string" ? value : "");
+    return {
+        taskId: record.taskId,
+        code: record.code,
+        ...(typeof record.key === "string" ? { key: record.key } : {}),
+        ...(typeof record.url === "string" ? { url: record.url } : {}),
+        title: record.title,
+        status: record.status,
+        priority: text(record.priority),
+        brief: text(record.brief),
+        note: text(record.note),
+        source: text(record.source),
+    };
+}
 // The one read a device makes per session: which tasks this branch and person are likely on.
 // It sends nothing the capture allowlist does not already forward (the canonical repository,
 // the branch workspace.observed carries, the prompt UserPromptSubmit forwards whole), as a
@@ -76,5 +97,6 @@ export async function fetchSessionContext(cfg, query, timeoutMs) {
         route: typeof record.route === "string" ? record.route : "",
         ...(typeof record.projectId === "string" ? { projectId: record.projectId } : {}),
         candidates: record.candidates.filter(isCandidate),
+        ...(Array.isArray(record.handoffs) ? { handoffs: record.handoffs.filter(isHandoff).map(toHandoff) } : {}),
     };
 }

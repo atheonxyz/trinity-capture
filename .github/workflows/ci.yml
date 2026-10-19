@@ -30,3 +30,7 @@ jobs:
       - run: git diff --exit-code -- cursor/dist
       - run: pnpm build:codex
       - run: git diff --exit-code -- codex/dist
+      - run: pnpm build:gemini
+      - run: git diff --exit-code -- gemini/dist
+      - run: pnpm build:copilot
+      - run: git diff --exit-code -- copilot/dist

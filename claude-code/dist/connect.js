@@ -32,6 +32,41 @@ export async function exchange(baseUrl, code, machineId = readMachineId) {
     const mcpUrl = optionalUrl(body.mcpUrl);
     return { token: body.token, ingestUrl: body.ingestUrl, deviceId: body.deviceId, ...(mcpUrl === undefined ? {} : { mcpUrl }) };
 }
+// Pairs a data directory the connect script owns outright, keeping a pairing on another Trinity origin.
+export async function pairWithCode(baseUrl, code, dataDir) {
+    const cfg = await exchange(baseUrl, code);
+    const existing = loadConfig(dataDir);
+    if (existing !== null && new URL(existing.ingestUrl).origin !== new URL(cfg.ingestUrl).origin) {
+        throw new Error("Existing Trinity connection kept. Disconnect before switching Trinity environments.");
+    }
+    markPairedAwaitingNewSession(dataDir, cfg.deviceId);
+    saveConfig(dataDir, cfg);
+    const policy = await refreshPolicy(dataDir, cfg);
+    if (!isPolicyFresh(policy, Date.now())) {
+        throw new Error("Trinity paired the device, but capture policy could not be synced. Run the connect command again.");
+    }
+    return activationStatus(dataDir);
+}
+export async function runPairingScript(product, dataDir, code) {
+    if (!supportsNodeVersion(process.versions.node)) {
+        console.error(`Trinity capture requires Node ${MIN_NODE_MAJOR} or newer; found ${process.version}.`);
+        process.exitCode = 1;
+        return;
+    }
+    if (code === "") {
+        console.error("No pairing code provided. Copy one from Trinity and run this again with it.");
+        process.exitCode = 1;
+        return;
+    }
+    try {
+        const status = await pairWithCode(process.env.TRINITY_BASE_URL ?? DEFAULT_BASE_URL, code, dataDir);
+        console.log(`Trinity paired (${status}). Start a new ${product} session in an enabled repository to begin capture.`);
+    }
+    catch (err) {
+        console.error(err instanceof Error ? err.message : String(err));
+        process.exitCode = 1;
+    }
+}
 async function main() {
     if (!supportsNodeVersion(process.versions.node)) {
         console.error(`Trinity capture requires Node ${MIN_NODE_MAJOR} or newer; found ${process.version}.`);
