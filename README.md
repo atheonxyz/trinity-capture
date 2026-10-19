@@ -10,7 +10,7 @@ The clients are deliberately small:
 - No tool input or output bodies, reasoning text, absolute local paths, or vendor account email fields.
 - A local outbox retries transient delivery failures without blocking the coding agent.
 
-Installing a plugin also gives the coding agent Trinity's read-only tools over the paired workspace, with no further setup and no secret written into any host configuration file. See [Agent tools](#agent-tools).
+Installing a plugin also gives the coding agent Trinity's tools over the paired workspace: reads, and writes that act as the paired person. There is no further setup and no secret is written into any host configuration file. See [Agent tools](#agent-tools).
 
 ## Install
 
@@ -63,13 +63,13 @@ branch switch. The context uses Codex's native `additionalContext` hook output.
 
 ## Update an existing installation
 
-The agent-tools release uses these plugin versions:
+The agent write tools release uses these plugin versions:
 
 | Host | Version | After updating |
 | --- | --- | --- |
-| Claude Code | `0.2.11` | Exit Claude Code and start a new session. |
-| Codex | `0.3.15` | Check the updated hooks, then start a new task. |
-| Cursor | `0.3.8` | Reload Cursor and start a new Agent conversation. |
+| Claude Code | `0.2.12` | Exit Claude Code and start a new session. |
+| Codex | `0.3.16` | Check the updated hooks, then start a new task. |
+| Cursor | `0.3.9` | Reload Cursor and start a new Agent conversation. |
 
 Update through the installation's existing source and verify the installed version.
 Each host's catalog publishes separately; a version in this repository does not mean
@@ -89,7 +89,7 @@ returns `ready`, keep the saved pairing and start a new task; do not exchange a 
 You can ask your coding agent:
 
 > Update my existing Trinity Capture plugin through its current installation source
-> to at least Claude Code 0.2.11, Codex 0.3.15, or Cursor 0.3.8, as appropriate for my
+> to at least Claude Code 0.2.12, Codex 0.3.16, or Cursor 0.3.9, as appropriate for my
 > host. Preserve its identity, data directory, and saved pairing, and verify the
 > installed version. For Codex, check the updated hooks and ask me to approve changed
 > definitions. Tell me the final restart or new-session step.
@@ -109,10 +109,29 @@ not enable those richer fields.
 ## Agent tools
 
 Each plugin bundles an MCP server named `trinity`. Once the machine is paired, the
-coding agent can call Trinity's read-only tools: `get_task`, `find_tasks`,
-`get_task_context`, `read_source`, `get_milestone`, and `list_milestones`. They read the workspace the device is paired with and change
-nothing. Installing the plugin is the whole setup; no host configuration file ever
-holds a Trinity secret.
+coding agent can call Trinity's tools. Installing the plugin is the whole setup; no
+host configuration file ever holds a Trinity secret.
+
+The read tools read the workspace the device is paired with and change nothing:
+
+- `get_task` reads one task by its code, issue, pull request, or tracker key.
+- `find_tasks` searches the tasks of the paired person's projects.
+- `get_task_context` gathers what Trinity knows about one task in one call.
+- `read_source` reads a source a task points to, such as a Slack thread.
+- `get_milestone` reads one milestone and its tasks.
+- `list_milestones` lists the milestones of the paired person's projects.
+
+The write tools act as the paired person, inside the projects they are a member of:
+
+- `start_task` declares the task this session works on. It attaches the session and moves a to-do task to in progress, started at the session's start.
+- `report_progress` records one line of what is happening now on a task.
+- `ask_blocker` posts a question in the task's originating Slack thread and opens an obligation for the person who asked.
+- `link_pull_request` attaches a pull request the agent opened to the task.
+- `propose_task` creates a task for work the agent found that nobody tracks.
+- `finish_task` marks a task ready for review, blocked, or done where no pull request is expected.
+
+Trinity refuses a write while the workspace is read-only for billing or while Trinity
+is being updated.
 
 The server is a small proxy. It answers the MCP handshake locally, so the host
 connects even when the machine is offline or not yet paired, and forwards each tool
@@ -149,7 +168,7 @@ For a matching repository, Trinity receives:
 - Tool names and call identifiers, never tool arguments or results.
 - Session lifecycle timestamps and completion reasons.
 - In Claude Code and Codex, once per session or branch, the tasks the session likely relates to: a read-only request carrying the repository, branch, and, when supported, the first prompt. Cursor makes the same read at session start, where its hook contract can inject context, but does not make an unsupported prompt-time read. The response can include task identity, status, priority, due and milestone signals, recent task activity, and open resolutions; the agent receives a bounded rendering marked as workspace data rather than instructions.
-- The Trinity tool calls the coding agent chooses to make: the tool name and the arguments the agent supplies, such as a task code or a search phrase, sent with the device credential to the paired Trinity server only. The answer is shown to the agent and stored nowhere. The proxy sends nothing else from the session.
+- The Trinity tool calls the coding agent chooses to make: the tool name and the arguments the agent supplies, sent with the device credential to the paired Trinity server only. For a read that is a task code or a search phrase. For a write it is what the agent wrote: a task code, a progress line, a question, a pull request number, or a proposed task's title and description. Trinity stores what a write records, as the paired person's action. The answer is shown to the agent and stored nowhere on the device. The proxy sends nothing else from the session.
 
 Trinity does not receive unmatched repository identities, absolute paths, environment variables, tool bodies, reasoning text, or Cursor's `user_email` field. See [PRIVACY.md](PRIVACY.md) for the complete disclosure.
 
