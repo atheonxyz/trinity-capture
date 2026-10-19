@@ -63,13 +63,13 @@ branch switch. The context uses Codex's native `additionalContext` hook output.
 
 ## Update an existing installation
 
-The agent write tools release uses these plugin versions:
+The task handoff release uses these plugin versions:
 
 | Host | Version | After updating |
 | --- | --- | --- |
-| Claude Code | `0.2.12` | Exit Claude Code and start a new session. |
-| Codex | `0.3.16` | Check the updated hooks, then start a new task. |
-| Cursor | `0.3.9` | Reload Cursor and start a new Agent conversation. |
+| Claude Code | `0.2.13` | Exit Claude Code and start a new session. |
+| Codex | `0.3.17` | Check the updated hooks, then start a new task. |
+| Cursor | `0.3.10` | Reload Cursor and start a new Agent conversation. |
 
 Update through the installation's existing source and verify the installed version.
 Each host's catalog publishes separately; a version in this repository does not mean
@@ -89,7 +89,7 @@ returns `ready`, keep the saved pairing and start a new task; do not exchange a 
 You can ask your coding agent:
 
 > Update my existing Trinity Capture plugin through its current installation source
-> to at least Claude Code 0.2.12, Codex 0.3.16, or Cursor 0.3.9, as appropriate for my
+> to at least Claude Code 0.2.13, Codex 0.3.17, or Cursor 0.3.10, as appropriate for my
 > host. Preserve its identity, data directory, and saved pairing, and verify the
 > installed version. For Codex, check the updated hooks and ask me to approve changed
 > definitions. Tell me the final restart or new-session step.
@@ -101,6 +101,10 @@ their titles, status, and priority. The lookup uses the enabled repository and b
 plus a prompt when the host supports it. Claude Code and Codex refresh as described
 above; Cursor fetches at session start only. Lookups do not change tasks, and a failed
 lookup does not stop capture.
+
+A task a person sends to this machine from Trinity opens their next session there
+with its brief and any note on what to focus on, in place of the likely tasks. Each
+handoff is delivered once, to the first session that asks for context.
 
 The plugin can also render due dates, milestone signals, recent activity, and open
 resolutions when an enriched backend returns them. Updating the plugin alone does
