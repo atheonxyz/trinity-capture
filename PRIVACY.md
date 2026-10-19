@@ -10,12 +10,12 @@ This identity follows the OS installation, not guaranteed physical hardware. Rei
 
 For repositories enabled in Trinity, the plugin may send:
 
-- User prompts and assistant responses.
+- User prompts and assistant responses. GitHub Copilot CLI's hooks carry no assistant response, only the path of a local transcript file, so for Copilot CLI the plugin sends prompts alone and never reads that file or sends its path.
 - Coding tool, model, session and turn identifiers, and timestamps.
 - Repository-relative working directory, branch, HEAD commit, dirty state, bounded diff statistics, and changed file names.
-- Tool names and call identifiers.
+- Tool names and, where the host supplies them, call identifiers. Gemini CLI and GitHub Copilot CLI supply none.
 - Session lifecycle and completion metadata.
-- A bounded read-only request for the tasks the session likely relates to. Claude Code and Codex send the repository, branch, and first prompt when the branch alone names nothing; Cursor sends the repository and branch at session start because its prompt hook cannot inject context. These fields are already covered above. The response can contain task identity, status, priority, due and milestone signals, recent task activity, and open resolutions from the person's Trinity workspace. It is shown to the coding agent as context and stored nowhere.
+- A bounded read-only request for the tasks the session likely relates to. Claude Code, Codex, and Gemini CLI send the repository, branch, and first prompt when the branch alone names nothing; Cursor and GitHub Copilot CLI send the repository and branch at session start because their prompt hooks cannot inject context. These fields are already covered above. The response can contain task identity, status, priority, due and milestone signals, recent task activity, and open resolutions from the person's Trinity workspace. It can also carry a task the person sent to this machine from Trinity, with its brief and their note; the plugin receives that handoff and sends nothing more for it. It is shown to the coding agent as context and stored nowhere.
 
 Through the bundled MCP server, the plugin also sends the Trinity tool calls the coding agent chooses to make: the tool name and the arguments the agent supplies, together with the device credential, to the paired Trinity server only. For a read tool the arguments are a task code or a search phrase. For a write tool they are what the agent wrote: a task code, a progress line, a question, a pull request number, or a proposed task's title and description. A write acts as the paired person inside their projects, and Trinity stores what it records. Each answer is workspace data shown to the coding agent and stored nowhere on the device.
 
@@ -29,6 +29,7 @@ The plugin does not send:
 - Tool input, tool output, shell output, file contents, or reasoning text.
 - Environment variables or stored credentials.
 - Cursor's `user_email` field.
+- Session transcript files or their paths, which Gemini CLI and GitHub Copilot CLI hand to every hook.
 - The raw macOS platform UUID, Windows MachineGuid, or Linux `/etc/machine-id`.
 - Anything from the session through the MCP server: it relays only the tool calls the coding agent makes, never prompts, file contents, paths, or other tool bodies.
 

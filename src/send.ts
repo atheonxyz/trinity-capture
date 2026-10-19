@@ -91,16 +91,55 @@ export interface SessionContextCandidate {
   };
 }
 
+// A task the person sent to this machine from Trinity, delivered once.
+export interface SessionContextHandoff {
+  taskId: string;
+  code: string;
+  key?: string;
+  url?: string;
+  title: string;
+  status: string;
+  priority: string;
+  brief: string;
+  note: string;
+  source: string;
+}
+
 export interface SessionContextAnswer {
   route: string;
   projectId?: string;
   candidates: SessionContextCandidate[];
+  handoffs?: SessionContextHandoff[];
 }
 
 function isCandidate(value: unknown): value is SessionContextCandidate {
   if (typeof value !== "object" || value === null) return false;
   const record = value as Record<string, unknown>;
   return typeof record.taskId === "string" && typeof record.title === "string" && typeof record.status === "string";
+}
+
+type WireHandoff = Record<string, unknown> & Pick<SessionContextHandoff, "taskId" | "code" | "title" | "status">;
+
+function isHandoff(value: unknown): value is WireHandoff {
+  if (typeof value !== "object" || value === null) return false;
+  const record = value as Record<string, unknown>;
+  return typeof record.taskId === "string" && typeof record.code === "string" && typeof record.title === "string" && typeof record.status === "string";
+}
+
+function toHandoff(record: WireHandoff): SessionContextHandoff {
+  const text = (value: unknown): string => (typeof value === "string" ? value : "");
+  return {
+    taskId: record.taskId,
+    code: record.code,
+    ...(typeof record.key === "string" ? { key: record.key } : {}),
+    ...(typeof record.url === "string" ? { url: record.url } : {}),
+    title: record.title,
+    status: record.status,
+    priority: text(record.priority),
+    brief: text(record.brief),
+    note: text(record.note),
+    source: text(record.source),
+  };
 }
 
 // The one read a device makes per session: which tasks this branch and person are likely on.
@@ -127,5 +166,6 @@ export async function fetchSessionContext(
     route: typeof record.route === "string" ? record.route : "",
     ...(typeof record.projectId === "string" ? { projectId: record.projectId } : {}),
     candidates: record.candidates.filter(isCandidate),
+    ...(Array.isArray(record.handoffs) ? { handoffs: record.handoffs.filter(isHandoff).map(toHandoff) } : {}),
   };
 }

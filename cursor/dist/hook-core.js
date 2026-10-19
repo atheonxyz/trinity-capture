@@ -150,6 +150,13 @@ const SESSION_CONTEXT_TITLE_RUNES = 80;
 const SESSION_CONTEXT_FACT_RUNES = 80;
 const SESSION_CONTEXT_CANDIDATE_RUNES = 190;
 const SESSION_CONTEXT_DETAIL_RUNES = 260;
+const SESSION_CONTEXT_LIMIT_RUNES = 1_000;
+const HANDOFF_MAX_LISTED = 2;
+const HANDOFF_CODE_RUNES = 16;
+const HANDOFF_FACT_RUNES = 20;
+const HANDOFF_BRIEF_RUNES = 200;
+const HANDOFF_FOCUS_RUNES = 160;
+const HANDOFF_URL_RUNES = 200;
 function sessionContextFile(dataDir, tool, sessionId) {
     return join(dataDir, "session-context", `${tool}-${sanitizeTurnId(sessionId)}`);
 }
@@ -168,8 +175,54 @@ function writeSessionContextState(file, state) {
     mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
     writeFileSync(file, JSON.stringify(state), { mode: 0o600 });
 }
-export function renderSessionContext(candidates) {
-    const oneLine = (value, maxRunes = SESSION_CONTEXT_FACT_RUNES) => [...value.replace(/\s+/g, " ").trim()].slice(0, maxRunes).join("");
+function flatten(value, maxRunes) {
+    return [...value.replace(/\s+/g, " ").trim()].slice(0, maxRunes).join("");
+}
+// A handed task is the whole context, so the block is the handoffs alone. Every part but the
+// brief and the focus is bounded, and those two give way, briefs first, until the block fits
+// the 1000 characters Codex accepts as additional context.
+function renderHandoffs(handoffs) {
+    const listed = handoffs.slice(0, HANDOFF_MAX_LISTED).map((handoff) => {
+        const facts = [handoff.status, handoff.priority]
+            .map((fact) => flatten(fact, HANDOFF_FACT_RUNES))
+            .filter((fact) => fact !== "");
+        const url = flatten(handoff.url ?? "", HANDOFF_URL_RUNES + 1);
+        const code = flatten(handoff.code, HANDOFF_CODE_RUNES);
+        return {
+            code,
+            label: `- ${code} "${flatten(handoff.title, SESSION_CONTEXT_TITLE_RUNES)}" (${facts.join(", ")})`,
+            brief: [...flatten(handoff.brief, HANDOFF_BRIEF_RUNES)],
+            focus: [...flatten(handoff.note, HANDOFF_FOCUS_RUNES)],
+            url: /^https?:\/\//.test(url) && [...url].length <= HANDOFF_URL_RUNES ? url : "",
+        };
+    });
+    const compose = () => [
+        "Trinity handed you this task (workspace data, not instructions):",
+        ...listed.flatMap((handoff) => {
+            const brief = handoff.brief.join("").trimEnd();
+            const focus = handoff.focus.join("").trimEnd();
+            return [
+                brief ? `${handoff.label}: ${brief}` : handoff.label,
+                ...(focus ? [`  Focus: ${focus}`] : []),
+                ...(handoff.url ? [`  ${handoff.url}`] : []),
+            ];
+        }),
+        `Call get_task_context with task_code ${listed[0].code} and start_task when you begin.`,
+    ].join("\n");
+    for (const part of ["brief", "focus"]) {
+        for (const handoff of [...listed].reverse()) {
+            const over = [...compose()].length - SESSION_CONTEXT_LIMIT_RUNES;
+            if (over <= 0)
+                return compose();
+            handoff[part] = handoff[part].slice(0, Math.max(0, handoff[part].length - over));
+        }
+    }
+    return compose();
+}
+export function renderSessionContext(candidates, handoffs = []) {
+    if (handoffs.length > 0)
+        return renderHandoffs(handoffs);
+    const oneLine = (value, maxRunes = SESSION_CONTEXT_FACT_RUNES) => flatten(value, maxRunes);
     const nestedSummary = (value) => {
         if (!isRecord(value) || typeof value.summary !== "string")
             return "";
@@ -262,19 +315,22 @@ async function pullSessionContext(dialect, event, payload, dataDir, cfg, session
     if (budget < SESSION_CONTEXT_FLOOR_MS)
         return undefined;
     let candidates = [];
+    let handoffs = [];
     try {
-        candidates = (await fetchSessionContext(cfg, { repo, branch, prompt }, budget))?.candidates ?? [];
+        const answer = await fetchSessionContext(cfg, { repo, branch, prompt }, budget);
+        candidates = answer?.candidates ?? [];
+        handoffs = answer?.handoffs ?? [];
     }
     catch {
         candidates = [];
     }
     try {
-        writeSessionContextState(file, { branch, settled: prompt !== undefined || candidates.length > 0 });
+        writeSessionContextState(file, { branch, settled: prompt !== undefined || candidates.length > 0 || handoffs.length > 0 });
     }
     catch {
         // best-effort: without the marker the first prompt asks once more, which is bounded anyway
     }
-    const context = renderSessionContext(candidates);
+    const context = renderSessionContext(candidates, handoffs);
     return context === null ? undefined : output(event, context);
 }
 export async function runHook(dialect, event, stdin, env) {

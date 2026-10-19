@@ -8,18 +8,33 @@ import { resolveGitHubRepository } from "./github-repo.js";
 import { isMainModule } from "./main-module.js";
 import { currentBranch, gitRemoteOf } from "./observe.js";
 import { fetchSessionContext, refreshPolicy, REQUEST_TIMEOUT_MS } from "./send.js";
-import type { SessionContextCandidate } from "./send.js";
+import type { SessionContextCandidate, SessionContextHandoff } from "./send.js";
 
 const LOOKUP_BUDGET_MS = 1_500;
 
-export function describeCandidates(candidates: readonly SessionContextCandidate[]): string {
-  if (candidates.length === 0) return "Trinity: no task matched this branch or what you said.";
+export function describeCandidates(
+  candidates: readonly SessionContextCandidate[],
+  handoffs: readonly SessionContextHandoff[] = [],
+): string {
+  if (candidates.length === 0 && handoffs.length === 0) return "Trinity: no task matched this branch or what you said.";
+  const handed = handoffs.flatMap((handoff) => {
+    const facts = [handoff.status, handoff.priority, handoff.url ?? ""].filter((fact) => fact !== "").join(", ");
+    const brief = handoff.brief ? `: ${handoff.brief}` : "";
+    return [
+      `Trinity handed you ${handoff.code} "${handoff.title}" (${facts})${brief}`,
+      ...(handoff.note ? [`  Focus: ${handoff.note}`] : []),
+    ];
+  });
+  if (candidates.length === 0) {
+    return [...handed, `Call get_task_context with task_code ${handoffs[0].code} and start_task when you begin.`].join("\n");
+  }
   const lines = candidates.map((candidate) => {
     const key = candidate.key ? `${candidate.key} ` : "";
     const url = candidate.url ? `, ${candidate.url}` : "";
     return `- ${key}${candidate.title} (${candidate.status}${url}) via ${candidate.via}`;
   });
   return [
+    ...handed,
     "Trinity: tasks this session likely relates to:",
     ...lines,
     'If one of these is the task, say "trinity-task: <key>" once so Trinity tracks the session against it.',
@@ -64,7 +79,7 @@ async function main(): Promise<void> {
   }
   try {
     const answer = await fetchSessionContext(cfg, { repo: route.canonicalRepo, branch: currentBranch(cwd) ?? "", prompt }, REQUEST_TIMEOUT_MS);
-    console.log(describeCandidates(answer?.candidates ?? []));
+    console.log(describeCandidates(answer?.candidates ?? [], answer?.handoffs ?? []));
   } catch (err) {
     console.error(`Trinity could not be reached: ${err instanceof Error ? err.message : String(err)}`);
     process.exitCode = 1;

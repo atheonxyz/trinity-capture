@@ -1,0 +1,65 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "name": "trinity-capture-session-start",
+            "type": "command",
+            "command": "node \"${extensionPath}${/}dist${/}gemini-hook.js\" SessionStart",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "BeforeAgent": [
+      {
+        "hooks": [
+          {
+            "name": "trinity-capture-before-agent",
+            "type": "command",
+            "command": "node \"${extensionPath}${/}dist${/}gemini-hook.js\" BeforeAgent",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "AfterTool": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "name": "trinity-capture-after-tool",
+            "type": "command",
+            "command": "node \"${extensionPath}${/}dist${/}gemini-hook.js\" AfterTool",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "AfterAgent": [
+      {
+        "hooks": [
+          {
+            "name": "trinity-capture-after-agent",
+            "type": "command",
+            "command": "node \"${extensionPath}${/}dist${/}gemini-hook.js\" AfterAgent",
+            "timeout": 5000
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "name": "trinity-capture-session-end",
+            "type": "command",
+            "command": "node \"${extensionPath}${/}dist${/}gemini-hook.js\" SessionEnd",
+            "timeout": 5000
+          }
+        ]
+      }
+    ]
+  }
+}

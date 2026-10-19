@@ -1,0 +1,31 @@
+{
+  "name": "trinity",
+  "owner": {
+    "name": "Trinity",
+    "email": "hi@usetrinity.ai"
+  },
+  "metadata": {
+    "description": "Trinity's GitHub Copilot CLI plugins."
+  },
+  "plugins": [
+    {
+      "name": "trinity-capture",
+      "description": "Captures GitHub Copilot CLI sessions into Trinity for allowlisted repositories.",
+      "version": "0.1.0",
+      "source": "./copilot",
+      "author": {
+        "name": "Trinity",
+        "email": "hi@usetrinity.ai"
+      },
+      "homepage": "https://usetrinity.ai",
+      "repository": "https://github.com/atheonxyz/trinity-capture",
+      "license": "Apache-2.0",
+      "keywords": [
+        "coding sessions",
+        "developer tools",
+        "team context"
+      ],
+      "category": "Productivity"
+    }
+  ]
+}

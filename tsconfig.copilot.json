@@ -1,0 +1,23 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "copilot/dist",
+    "composite": false,
+    "declaration": false,
+    "incremental": false
+  },
+  "include": [
+    "src/config.ts",
+    "src/gate.ts",
+    "src/outbox.ts",
+    "src/send.ts",
+    "src/observe.ts",
+    "src/hook-core.ts",
+    "src/copilot-hook.ts",
+    "src/connect.ts",
+    "src/copilot-connect.ts",
+    "src/mcp.ts",
+    "src/copilot-mcp.ts"
+  ]
+}

@@ -131,3 +131,23 @@ test("the printed list carries key, title, status, link and rung, or says nothin
   assert.match(text, /^- acme\/widgets#42 Fix the timeouts \(todo, https:\/\/github\.com\/acme\/widgets\/issues\/42\) via prompt$/m);
   assert.match(text, /^- Untracked \(in_progress\) via assigned$/m);
 });
+
+test("the printed list names handed tasks first, then the candidates", () => {
+  const handed = {
+    taskId: "t31", code: "T31", url: "https://trinity.example/tasks/T31", title: "Fix the timeouts", status: "todo", priority: "P1",
+    brief: "Requests time out under load.", note: "Start with the retry loop.", source: "slack",
+  };
+  const alone = describeCandidates([], [handed]);
+  assert.equal(alone, [
+    'Trinity handed you T31 "Fix the timeouts" (todo, P1, https://trinity.example/tasks/T31): Requests time out under load.',
+    "  Focus: Start with the retry loop.",
+    "Call get_task_context with task_code T31 and start_task when you begin.",
+  ].join("\n"));
+
+  const both = describeCandidates([timeouts], [{ ...handed, note: "" }]);
+  const lines = both.split("\n");
+  assert.match(lines[0], /^Trinity handed you T31 "Fix the timeouts"/);
+  assert.equal(lines[1], "Trinity: tasks this session likely relates to:");
+  assert.match(both, /^- acme\/widgets#42 Fix the timeouts \(todo, https:\/\/github\.com\/acme\/widgets\/issues\/42\) via prompt$/m);
+  assert.equal(describeCandidates([timeouts], []), describeCandidates([timeouts]));
+});

@@ -7,7 +7,7 @@ import { BatchRequestError, refreshPolicy, sendBatch } from "./send.js";
 
 export interface CaptureEvent {
   captureEventId: string;
-  tool: "claude_code" | "codex" | "cursor";
+  tool: "claude_code" | "codex" | "cursor" | "gemini_cli" | "copilot_cli";
   kind: string;
   externalSessionId: string;
   repo: string;
