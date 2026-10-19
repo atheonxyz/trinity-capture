@@ -1,0 +1,23 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "gemini/dist",
+    "composite": false,
+    "declaration": false,
+    "incremental": false
+  },
+  "include": [
+    "src/config.ts",
+    "src/gate.ts",
+    "src/outbox.ts",
+    "src/send.ts",
+    "src/observe.ts",
+    "src/hook-core.ts",
+    "src/gemini-hook.ts",
+    "src/connect.ts",
+    "src/gemini-connect.ts",
+    "src/mcp.ts",
+    "src/gemini-mcp.ts"
+  ]
+}

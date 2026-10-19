@@ -1,0 +1,6 @@
+description = "Pair Gemini CLI with Trinity: /trinity:connect <pairing-code>"
+prompt = """
+Trinity Capture ran its connect script for this Gemini CLI installation. Report its result to the person in one or two sentences. Never repeat the pairing code, a token or a credential.
+
+!{node "$HOME/.gemini/extensions/trinity-capture/dist/gemini-connect.js" {{args}}}
+"""

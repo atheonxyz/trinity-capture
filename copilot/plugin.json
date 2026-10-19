@@ -1,0 +1,19 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "trinity-capture",
+  "version": "0.1.0",
+  "description": "Captures GitHub Copilot CLI sessions into Trinity for allowlisted repositories.",
+  "author": {
+    "name": "Trinity",
+    "email": "hi@usetrinity.ai",
+    "url": "https://usetrinity.ai"
+  },
+  "homepage": "https://usetrinity.ai",
+  "repository": "https://github.com/atheonxyz/trinity-capture",
+  "license": "Apache-2.0",
+  "keywords": [
+    "coding sessions",
+    "developer tools",
+    "team context"
+  ]
+}
