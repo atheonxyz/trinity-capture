@@ -106,7 +106,7 @@ credential directory below in `sandbox.userPolicy` so the hooks can reach it.
 
 ## Update an existing installation
 
-The task handoff release uses these plugin versions:
+The handoff acknowledgment release uses these plugin versions:
 
 | Host | Version | After updating |
 | --- | --- | --- |
@@ -148,8 +148,10 @@ above; Cursor fetches at session start only. Lookups do not change tasks, and a 
 lookup does not stop capture.
 
 A task a person sends to this machine from Trinity opens their next session there
-with its brief and any note on what to focus on, in place of the likely tasks. Each
-handoff is delivered once, to the first session that asks for context. A title, brief
+with its brief and any note on what to focus on, in place of the likely tasks. The plugin
+acknowledges the handoffs it showed, and the server keeps answering a handoff until an
+acknowledgment lands, so a pull that timed out does not lose it. A session whose
+acknowledgment did not land sees the handoff again in the next session. A title, brief
 or note too long for the block ends with "…", and the closing line names every
 handed task's code for `get_task_context`, which reads the task in full.
 

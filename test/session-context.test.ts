@@ -8,6 +8,7 @@ import type { DeviceConfig, Policy } from "../src/config.js";
 import { claudeCodeDialect } from "../src/claude-hook.js";
 import { renderSessionContext, runHook } from "../src/hook-core.js";
 import type { Dialect } from "../src/hook-core.js";
+import { INLINE_DRAIN_BUDGET_MS } from "../src/outbox.js";
 import { initRepo, outboxFiles, sessionStartInput, stubFetch, tmpDataDir } from "./helpers/claude-hook-fixture.js";
 
 // The real dialect minus its inline budget: that budget is wall-clock, and a
@@ -52,6 +53,7 @@ test("SessionStart asks once with the branch and hands Claude the task as contex
   const dataDir = pairedDataDir();
   const repo = initRepo("git@github.com:acme/widgets.git");
   const asked: Record<string, unknown>[] = [];
+  let acks = 0;
   const restore = stubFetch({
     onSessionContext: (body, init) => {
       asked.push(body);
@@ -59,13 +61,18 @@ test("SessionStart asks once with the branch and hands Claude the task as contex
       assert.equal(new Headers(init?.headers).get("authorization"), "Bearer tok");
       return Response.json({ route: "project", projectId: "p1", candidates: [timeouts] });
     },
+    onHandoffAck: () => {
+      acks++;
+      return Response.json({ acknowledged: 0 });
+    },
   });
   try {
     const output = await run("SessionStart", { ...sessionStartInput, cwd: repo }, dataDir);
     const parsed = parseOutput(output);
     assert.equal(parsed.hookSpecificOutput.hookEventName, "SessionStart");
     assert.match(parsed.hookSpecificOutput.additionalContext, /acme\/widgets#42 "Fix the timeouts" — todo; P1/);
-    assert.deepEqual(asked, [{ repo: "github.com/acme/widgets", branch: "main" }]);
+    assert.deepEqual(asked, [{ repo: "github.com/acme/widgets", branch: "main", ackHandoffs: true }]);
+    assert.equal(acks, 0, "candidates alone are never acknowledged");
     assert.equal(outboxFiles(dataDir).length, 2, "capture is unchanged by the pull");
 
     // A settled session never asks again, prompt or not.
@@ -96,8 +103,8 @@ test("when the branch names nothing, the first prompt asks once more and later p
     assert.match(parsed.hookSpecificOutput.additionalContext, /acme\/widgets#42 "Fix the timeouts" — todo; P1/);
     assert.match(parsed.hookSpecificOutput.additionalContext, /ENG-7 "Add task sync" — in_progress; P1/);
     assert.deepEqual(asked, [
-      { repo: "github.com/acme/widgets", branch: "main" },
-      { repo: "github.com/acme/widgets", branch: "main", prompt: "fix the timeouts" },
+      { repo: "github.com/acme/widgets", branch: "main", ackHandoffs: true },
+      { repo: "github.com/acme/widgets", branch: "main", ackHandoffs: true, prompt: "fix the timeouts" },
     ]);
 
     const second = await run("UserPromptSubmit", { session_id: "s1", cwd: repo, prompt_id: "p2", prompt: "now the tests" }, dataDir);
@@ -127,8 +134,8 @@ test("a branch switched mid-session asks again for the new branch, once", async 
     assert.equal(parseOutput(switched).hookSpecificOutput.hookEventName, "UserPromptSubmit");
     assert.equal(await run("UserPromptSubmit", { session_id: "s1", cwd: repo, prompt_id: "p3", prompt: "and on" }, dataDir), undefined);
     assert.deepEqual(asked, [
-      { repo: "github.com/acme/widgets", branch: "main" },
-      { repo: "github.com/acme/widgets", branch: "fix/issue-43", prompt: "now the other one" },
+      { repo: "github.com/acme/widgets", branch: "main", ackHandoffs: true },
+      { repo: "github.com/acme/widgets", branch: "fix/issue-43", ackHandoffs: true, prompt: "now the other one" },
     ]);
   } finally {
     restore();
@@ -165,7 +172,11 @@ test("a host with no context door never pulls at all", async () => {
   const restore = stubFetch({
     onSessionContext: () => {
       calls++;
-      return Response.json({ route: "project", candidates: [timeouts] });
+      return Response.json({ route: "project", candidates: [timeouts], handoffs: [{ ...handedTimeouts, id: "h31" }] });
+    },
+    onHandoffAck: () => {
+      calls++;
+      return Response.json({ acknowledged: 1 });
     },
   });
   try {
@@ -173,7 +184,7 @@ test("a host with no context door never pulls at all", async () => {
     const env = { ...process.env, CLAUDE_PLUGIN_DATA: dataDir };
     assert.equal(await runHook(silent, "SessionStart", JSON.stringify({ ...sessionStartInput, cwd: repo }), env), undefined);
     assert.equal(await runHook(silent, "UserPromptSubmit", JSON.stringify({ session_id: "s1", cwd: repo, prompt_id: "p1", prompt: "hello" }), env), undefined);
-    assert.equal(calls, 0);
+    assert.equal(calls, 0, "no pull and no ack: a block that is not output acknowledges nothing");
     assert.equal(outboxFiles(dataDir).length, 3, "capture is the same with or without the door");
   } finally {
     restore();
@@ -372,14 +383,22 @@ test("with no handed task the block is byte-identical to the candidates' block",
   assert.equal(renderSessionContext([], []), null);
 });
 
-test("SessionStart opens with the handed task, and the handoff settles the session", async () => {
+test("SessionStart opens with the handed task, acknowledges it, and the handoff settles the session", async () => {
   const dataDir = pairedDataDir();
   const repo = initRepo("git@github.com:acme/widgets.git");
+  const unnamed = { ...handedTimeouts, taskId: "t32", code: "T32", title: "Add task sync", note: "" };
   let calls = 0;
+  const acks: Record<string, unknown>[] = [];
   const restore = stubFetch({
     onSessionContext: () => {
       calls++;
-      return Response.json({ route: "project", projectId: "p1", candidates: [], handoffs: [handedTimeouts, { taskId: 7 }] });
+      return Response.json({ route: "project", projectId: "p1", candidates: [], handoffs: [{ ...handedTimeouts, id: "h31" }, unnamed, { taskId: 7 }] });
+    },
+    onHandoffAck: (body, init) => {
+      acks.push(body);
+      assert.equal(init?.method, "POST");
+      assert.equal(new Headers(init?.headers).get("authorization"), "Bearer tok");
+      return Response.json({ acknowledged: 1 });
     },
   });
   try {
@@ -389,10 +408,86 @@ test("SessionStart opens with the handed task, and the handoff settles the sessi
     assert.match(context, /- T31 "Fix the timeouts" \(todo, P1\): Requests to the sync endpoint/);
     assert.match(context, /Focus: Start with the retry loop in the client\./);
     assert.match(context, /task_code T31 and start_task/);
-    assert.equal((context.match(/^- /gm) ?? []).length, 1, "a malformed handoff is dropped");
+    assert.equal((context.match(/^- /gm) ?? []).length, 2, "a malformed handoff is dropped");
+    assert.equal(context, renderSessionContext([], [handedTimeouts, unnamed]), "an id changes nothing in the block");
+    assert.deepEqual(acks, [{ ids: ["h31"] }], "only the handoffs the server named are acknowledged");
 
     assert.equal(await run("UserPromptSubmit", { session_id: "s1", cwd: repo, prompt_id: "p1", prompt: "go" }, dataDir), undefined);
     assert.equal(calls, 1, "a session that received a handoff does not ask again on its first prompt");
+  } finally {
+    restore();
+  }
+});
+
+test("the ack names exactly the handoffs the block lists, and an older server's answer sends none", async () => {
+  const handed = (n: number, id?: string) => ({ ...handedTimeouts, taskId: `t${n}`, code: `T${n}`, ...(id === undefined ? {} : { id }) });
+  const acks: Record<string, unknown>[] = [];
+  let handoffs: Record<string, unknown>[] = [handed(1, "h1"), handed(2, "h2"), handed(3, "h3")];
+  const restore = stubFetch({
+    onSessionContext: () => Response.json({ route: "project", candidates: [timeouts], handoffs }),
+    onHandoffAck: (body) => {
+      acks.push(body);
+      return Response.json({ acknowledged: 2 });
+    },
+  });
+  try {
+    const context = parseOutput(await run("SessionStart", { ...sessionStartInput, cwd: initRepo("git@github.com:acme/widgets.git") }, pairedDataDir()));
+    assert.match(context.hookSpecificOutput.additionalContext, /^- T2 /m);
+    assert.doesNotMatch(context.hookSpecificOutput.additionalContext, /^- T3 /m);
+    assert.deepEqual(acks, [{ ids: ["h1", "h2"] }], "the third handoff is neither listed nor acknowledged");
+
+    handoffs = [handed(1), handed(2)];
+    const older = parseOutput(await run("SessionStart", { ...sessionStartInput, cwd: initRepo("git@github.com:acme/widgets.git") }, pairedDataDir()));
+    assert.match(older.hookSpecificOutput.additionalContext, /^- T1 /m);
+    assert.equal(acks.length, 1, "handoffs without ids are shown and no ack is sent");
+  } finally {
+    restore();
+  }
+});
+
+test("an ack that fails never touches the hook's output", async () => {
+  const failures: Record<string, (init?: RequestInit) => Promise<Response>> = {
+    "network error": () => Promise.reject(new Error("stub: unreachable by design")),
+    "older server": () => Promise.resolve(new Response(null, { status: 404 })),
+    "timeout": (init) => new Promise((_, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal?.reason))),
+  };
+  for (const [name, fail] of Object.entries(failures)) {
+    let acked = 0;
+    const restore = stubFetch({
+      onSessionContext: () => Response.json({ route: "project", candidates: [], handoffs: [{ ...handedTimeouts, id: "h31" }] }),
+      onHandoffAck: (_body, init) => {
+        acked++;
+        return fail(init);
+      },
+    });
+    try {
+      const context = parseOutput(await run("SessionStart", { ...sessionStartInput, cwd: initRepo("git@github.com:acme/widgets.git") }, pairedDataDir()));
+      assert.match(context.hookSpecificOutput.additionalContext, /- T31 "Fix the timeouts"/, name);
+      assert.equal(acked, 1, name);
+    } finally {
+      restore();
+    }
+  }
+});
+
+test("no ack is sent once the hook's budget is spent", async () => {
+  const dataDir = pairedDataDir();
+  const repo = initRepo("git@github.com:acme/widgets.git");
+  let acks = 0;
+  const restore = stubFetch({
+    onSessionContext: async () => {
+      await new Promise((resolve) => setTimeout(resolve, INLINE_DRAIN_BUDGET_MS + 100));
+      return Response.json({ route: "project", candidates: [], handoffs: [{ ...handedTimeouts, id: "h31" }] });
+    },
+    onHandoffAck: () => {
+      acks++;
+      return Response.json({ acknowledged: 1 });
+    },
+  });
+  try {
+    const output = await runHook(claudeCodeDialect, "SessionStart", JSON.stringify({ ...sessionStartInput, cwd: repo }), { ...process.env, CLAUDE_PLUGIN_DATA: dataDir });
+    assert.match(parseOutput(output).hookSpecificOutput.additionalContext, /- T31 "Fix the timeouts"/);
+    assert.equal(acks, 0, "an ack never runs past the hook's deadline");
   } finally {
     restore();
   }

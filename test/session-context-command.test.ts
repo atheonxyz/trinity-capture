@@ -32,15 +32,23 @@ function runCommand(input: string, dataDir: string, cwd: string, env: NodeJS.Pro
 
 test("/trinity:task pulls with the branch and what the person said, and prints the tasks", async (t) => {
   const bodies: Record<string, unknown>[] = [];
+  const acks: Record<string, unknown>[] = [];
+  const handed = { taskId: "t31", id: "h31", code: "T31", title: "Fix the timeouts", status: "todo", priority: "P1", brief: "", note: "", source: "dashboard" };
   const server = createServer((request, response) => {
     let raw = "";
     request.on("data", (chunk: Buffer) => (raw += chunk.toString()));
     request.on("end", () => {
-      assert.equal(request.url, "/api/v1/ingest/session-context");
       assert.equal(request.headers.authorization, "Bearer tok");
-      bodies.push(JSON.parse(raw) as Record<string, unknown>);
       response.setHeader("Content-Type", "application/json");
-      response.end(JSON.stringify({ route: "project", projectId: "p1", candidates: [timeouts] }));
+      if (request.url === "/api/v1/ingest/handoffs/ack") {
+        acks.push(JSON.parse(raw) as Record<string, unknown>);
+        response.end(JSON.stringify({ acknowledged: 1 }));
+        return;
+      }
+      assert.equal(request.url, "/api/v1/ingest/session-context");
+      const body = JSON.parse(raw) as Record<string, unknown>;
+      bodies.push(body);
+      response.end(JSON.stringify({ route: "project", projectId: "p1", candidates: [timeouts], ...(body.prompt === "the handed one" ? { handoffs: [handed] } : {}) }));
     });
   });
   t.after(() => {
@@ -63,12 +71,18 @@ test("/trinity:task pulls with the branch and what the person said, and prints t
   assert.equal(run.code, 0, run.stderr);
   assert.match(run.stdout, /acme\/widgets#42 Fix the timeouts \(todo, https:\/\/github\.com\/acme\/widgets\/issues\/42\) via prompt/);
   assert.match(run.stdout, /trinity-task: <key>/);
-  assert.deepEqual(bodies, [{ repo: "github.com/acme/widgets", branch: "main", prompt: "the timeouts" }]);
+  assert.deepEqual(bodies, [{ repo: "github.com/acme/widgets", branch: "main", ackHandoffs: true, prompt: "the timeouts" }]);
+  assert.deepEqual(acks, [], "candidates alone are never acknowledged");
+
+  const withHandoff = await runCommand(JSON.stringify({ prompt: "the handed one" }), dataDir, repo, { ...process.env, CLAUDE_PLUGIN_DATA: dataDir });
+  assert.equal(withHandoff.code, 0, withHandoff.stderr);
+  assert.match(withHandoff.stdout, /^Trinity handed you T31 "Fix the timeouts"/);
+  assert.deepEqual(acks, [{ ids: ["h31"] }], "the command acknowledges the handoffs it printed");
 
   const unpaired = await runCommand(JSON.stringify({ prompt: "anything" }), tmpDataDir(), repo, { ...process.env, CLAUDE_PLUGIN_DATA: undefined });
   assert.equal(unpaired.code, 1);
   assert.match(unpaired.stderr, /not paired/);
-  assert.equal(bodies.length, 1);
+  assert.equal(bodies.length, 2);
 
   // Execute the documented shell transport, not just execFile's already-safe argv.
   const template = command.match(/```bash\n([\s\S]*?)\n```/)?.[1];
@@ -92,7 +106,7 @@ test("/trinity:task pulls with the branch and what the person said, and prints t
     });
     assert.equal(result.code, 0, result.stderr);
     assert.deepEqual(bodies.at(-1), {
-      repo: "github.com/acme/widgets", branch: "main", ...(prompt ? { prompt } : {}),
+      repo: "github.com/acme/widgets", branch: "main", ackHandoffs: true, ...(prompt ? { prompt } : {}),
     });
     assert.equal(existsSync(sentinel), false, "task text must never execute as shell code");
   }

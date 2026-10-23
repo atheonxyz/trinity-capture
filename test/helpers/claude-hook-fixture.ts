@@ -43,7 +43,8 @@ export function runClaudeHook(
 export function stubFetch(options: {
   readonly onPolicy?: () => Response;
   readonly onBatch?: (items: readonly { readonly captureEventId: string }[]) => Response;
-  readonly onSessionContext?: (body: Record<string, unknown>, init?: RequestInit) => Response;
+  readonly onSessionContext?: (body: Record<string, unknown>, init?: RequestInit) => Response | Promise<Response>;
+  readonly onHandoffAck?: (body: Record<string, unknown>, init?: RequestInit) => Response | Promise<Response>;
 }): () => void {
   const original = globalThis.fetch;
   const stub: typeof fetch = async (url, init) => {
@@ -53,6 +54,12 @@ export function stubFetch(options: {
       const parsed: unknown = JSON.parse(String(init?.body));
       if (typeof parsed !== "object" || parsed === null) throw new Error("session-context body is not an object");
       return options.onSessionContext(parsed as Record<string, unknown>, init);
+    }
+    if (href.endsWith("/handoffs/ack")) {
+      if (!options.onHandoffAck) throw new Error(`unexpected handoff ack fetch: ${href}`);
+      const parsed: unknown = JSON.parse(String(init?.body));
+      if (typeof parsed !== "object" || parsed === null) throw new Error("handoff ack body is not an object");
+      return options.onHandoffAck(parsed as Record<string, unknown>, init);
     }
     if (href.endsWith("/policy")) {
       if (!options.onPolicy) throw new Error(`unexpected policy fetch: ${href}`);
