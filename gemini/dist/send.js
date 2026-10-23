@@ -63,6 +63,7 @@ function toHandoff(record) {
     const text = (value) => (typeof value === "string" ? value : "");
     return {
         taskId: record.taskId,
+        ...(typeof record.id === "string" ? { id: record.id } : {}),
         code: record.code,
         ...(typeof record.key === "string" ? { key: record.key } : {}),
         ...(typeof record.url === "string" ? { url: record.url } : {}),
@@ -78,11 +79,13 @@ function toHandoff(record) {
 // It sends nothing the capture allowlist does not already forward (the canonical repository,
 // the branch workspace.observed carries, the prompt UserPromptSubmit forwards whole), as a
 // body rather than a query string. Any failure is null: the pull never blocks capture.
+// `ackHandoffs` asks the server to keep answering a handed task until the ack below names it,
+// so a pull that gives up before the answer lands cannot lose one.
 export async function fetchSessionContext(cfg, query, timeoutMs) {
     const res = await fetch(cfg.ingestUrl.replace(/\/batches$/, "/session-context"), {
         method: "POST",
         headers: { Authorization: `Bearer ${cfg.token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ repo: query.repo, branch: query.branch, ...(query.prompt === undefined ? {} : { prompt: query.prompt }) }),
+        body: JSON.stringify({ repo: query.repo, branch: query.branch, ackHandoffs: true, ...(query.prompt === undefined ? {} : { prompt: query.prompt }) }),
         signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok)
@@ -99,4 +102,14 @@ export async function fetchSessionContext(cfg, query, timeoutMs) {
         candidates: record.candidates.filter(isCandidate),
         ...(Array.isArray(record.handoffs) ? { handoffs: record.handoffs.filter(isHandoff).map(toHandoff) } : {}),
     };
+}
+// Names the handed tasks the agent was shown, so the server stops answering them. A failed
+// ack only means the next session shows them again.
+export async function ackHandoffs(cfg, ids, timeoutMs) {
+    await fetch(cfg.ingestUrl.replace(/\/batches$/, "/handoffs/ack"), {
+        method: "POST",
+        headers: { Authorization: `Bearer ${cfg.token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+        signal: AbortSignal.timeout(timeoutMs),
+    });
 }

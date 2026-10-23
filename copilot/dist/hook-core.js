@@ -11,7 +11,7 @@ import { isPolicyFresh, resolveRoute } from "./gate.js";
 import { resolveGitHubRepository } from "./github-repo.js";
 import { appendEvent, drain, INLINE_DRAIN_BUDGET_MS } from "./outbox.js";
 import { currentBranch, gitRemoteOf, repoRelativeCwd, workspaceObserved } from "./observe.js";
-import { fetchSessionContext, refreshPolicy } from "./send.js";
+import { ackHandoffs, fetchSessionContext, refreshPolicy } from "./send.js";
 const SETUP_PROMPT_PREFIX = "[Trinity setup]\n";
 const POLICY_RETRY_MS = 60_000;
 function isENOENT(error) {
@@ -311,6 +311,7 @@ async function pullSessionContext(dialect, event, payload, dataDir, cfg, session
     else if (!dialect.isSessionStart(event)) {
         return undefined;
     }
+    const deadline = Date.now() + (remaining ?? Infinity);
     const budget = Math.min(SESSION_CONTEXT_BUDGET_MS, remaining ?? SESSION_CONTEXT_BUDGET_MS);
     if (budget < SESSION_CONTEXT_FLOOR_MS)
         return undefined;
@@ -331,7 +332,15 @@ async function pullSessionContext(dialect, event, payload, dataDir, cfg, session
         // best-effort: without the marker the first prompt asks once more, which is bounded anyway
     }
     const context = renderSessionContext(candidates, handoffs);
-    return context === null ? undefined : output(event, context);
+    if (context === null)
+        return undefined;
+    // The block is going out, so the server may stop answering the handoffs it lists. A failed
+    // ack shows them again next session, which beats a pull that gave up losing them for good.
+    const ids = handoffs.slice(0, HANDOFF_MAX_LISTED).flatMap((handoff) => (handoff.id === undefined ? [] : [handoff.id]));
+    const ackBudget = Math.min(SESSION_CONTEXT_BUDGET_MS, deadline - Date.now());
+    if (ids.length > 0 && ackBudget >= SESSION_CONTEXT_FLOOR_MS)
+        await ackHandoffs(cfg, ids, ackBudget).catch(() => undefined);
+    return output(event, context);
 }
 export async function runHook(dialect, event, stdin, env) {
     // Taken at hook entry, before any I/O: an inline drain's budget covers

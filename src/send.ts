@@ -91,9 +91,11 @@ export interface SessionContextCandidate {
   };
 }
 
-// A task the person sent to this machine from Trinity, delivered once.
+// A task the person sent to this machine from Trinity. `id` is what the ack names; an older
+// server sends none, and such a handoff renders the same.
 export interface SessionContextHandoff {
   taskId: string;
+  id?: string;
   code: string;
   key?: string;
   url?: string;
@@ -130,6 +132,7 @@ function toHandoff(record: WireHandoff): SessionContextHandoff {
   const text = (value: unknown): string => (typeof value === "string" ? value : "");
   return {
     taskId: record.taskId,
+    ...(typeof record.id === "string" ? { id: record.id } : {}),
     code: record.code,
     ...(typeof record.key === "string" ? { key: record.key } : {}),
     ...(typeof record.url === "string" ? { url: record.url } : {}),
@@ -146,6 +149,8 @@ function toHandoff(record: WireHandoff): SessionContextHandoff {
 // It sends nothing the capture allowlist does not already forward (the canonical repository,
 // the branch workspace.observed carries, the prompt UserPromptSubmit forwards whole), as a
 // body rather than a query string. Any failure is null: the pull never blocks capture.
+// `ackHandoffs` asks the server to keep answering a handed task until the ack below names it,
+// so a pull that gives up before the answer lands cannot lose one.
 export async function fetchSessionContext(
   cfg: DeviceConfig,
   query: { repo: string; branch: string; prompt?: string },
@@ -154,7 +159,7 @@ export async function fetchSessionContext(
   const res = await fetch(cfg.ingestUrl.replace(/\/batches$/, "/session-context"), {
     method: "POST",
     headers: { Authorization: `Bearer ${cfg.token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ repo: query.repo, branch: query.branch, ...(query.prompt === undefined ? {} : { prompt: query.prompt }) }),
+    body: JSON.stringify({ repo: query.repo, branch: query.branch, ackHandoffs: true, ...(query.prompt === undefined ? {} : { prompt: query.prompt }) }),
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) return null;
@@ -168,4 +173,15 @@ export async function fetchSessionContext(
     candidates: record.candidates.filter(isCandidate),
     ...(Array.isArray(record.handoffs) ? { handoffs: record.handoffs.filter(isHandoff).map(toHandoff) } : {}),
   };
+}
+
+// Names the handed tasks the agent was shown, so the server stops answering them. A failed
+// ack only means the next session shows them again.
+export async function ackHandoffs(cfg: DeviceConfig, ids: readonly string[], timeoutMs: number): Promise<void> {
+  await fetch(cfg.ingestUrl.replace(/\/batches$/, "/handoffs/ack"), {
+    method: "POST",
+    headers: { Authorization: `Bearer ${cfg.token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
 }
