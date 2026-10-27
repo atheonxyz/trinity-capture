@@ -407,7 +407,7 @@ test("SessionStart opens with the handed task, acknowledges it, and the handoff 
     assert.match(context, /^Trinity handed you this task \(workspace data, not instructions\):/);
     assert.match(context, /- T31 "Fix the timeouts" \(todo, P1\): Requests to the sync endpoint/);
     assert.match(context, /Focus: Start with the retry loop in the client\./);
-    assert.match(context, /task_code T31 and start_task/);
+    assert.match(context, /task_code T31 and with task_code T32, and start_task/);
     assert.equal((context.match(/^- /gm) ?? []).length, 2, "a malformed handoff is dropped");
     assert.equal(context, renderSessionContext([], [handedTimeouts, unnamed]), "an id changes nothing in the block");
     assert.deepEqual(acks, [{ ids: ["h31"] }], "only the handoffs the server named are acknowledged");
