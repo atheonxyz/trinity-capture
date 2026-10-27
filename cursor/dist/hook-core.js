@@ -157,6 +157,29 @@ const HANDOFF_FACT_RUNES = 20;
 const HANDOFF_BRIEF_RUNES = 200;
 const HANDOFF_FOCUS_RUNES = 160;
 const HANDOFF_URL_RUNES = 200;
+const BRIEFING_MAX_IN_FLIGHT = 5;
+const BRIEFING_MAX_SUGGESTED = 3;
+const BRIEFING_CODE_RUNES = 16;
+const BRIEFING_FACT_RUNES = 20;
+const BRIEFING_TITLE_RUNES = 60;
+const BRIEFING_NAME_RUNES = 40;
+const BRIEFING_NOTE_RUNES = 80;
+const BRIEFING_URL_RUNES = 160;
+const BRIEFING_REPO_RUNES = 160;
+const PRODUCT_NAMES = {
+    claude_code: "Claude Code",
+    codex: "Codex",
+    cursor: "Cursor",
+    gemini_cli: "Gemini CLI",
+    copilot_cli: "Copilot CLI",
+};
+const TRINITY_WORDS = {
+    queued: "Trinity will start on it",
+    working: "Trinity is working on it",
+    published: "Trinity opened a pull request",
+    blocked: "Trinity is waiting on a question",
+    failed: "Trinity's last attempt failed",
+};
 function sessionContextFile(dataDir, tool, sessionId) {
     return join(dataDir, "session-context", `${tool}-${sanitizeTurnId(sessionId)}`);
 }
@@ -232,7 +255,99 @@ function renderHandoffs(handoffs) {
     }
     return compose();
 }
-export function renderSessionContext(candidates, handoffs = []) {
+function cut(value, maxRunes) {
+    return clip([...flatten(value, maxRunes + 1)], maxRunes);
+}
+// A session's start in this machine's local time, dated only when it was not today.
+function localTime(since, now) {
+    const at = new Date(since);
+    if (Number.isNaN(at.getTime()))
+        return "";
+    const two = (value) => String(value).padStart(2, "0");
+    const time = `${two(at.getHours())}:${two(at.getMinutes())}`;
+    return at.toDateString() === now.toDateString() ? time : `${at.getFullYear()}-${two(at.getMonth() + 1)}-${two(at.getDate())} ${time}`;
+}
+function briefingLabel(code, title, facts) {
+    const known = facts.filter((fact) => fact !== "");
+    const label = `- ${flatten(code, BRIEFING_CODE_RUNES)} "${cut(title, BRIEFING_TITLE_RUNES)}"`;
+    return known.length > 0 ? `${label} (${known.join(", ")})` : label;
+}
+function trinityWords(trinity) {
+    const url = flatten(trinity.pullRequestUrl ?? "", BRIEFING_URL_RUNES + 1);
+    const linked = trinity.state === "published" && /^https?:\/\/\S+$/.test(url) && [...url].length <= BRIEFING_URL_RUNES;
+    return linked ? `${TRINITY_WORDS.published}, ${url}` : TRINITY_WORDS[trinity.state];
+}
+function sessionWords(session, person, now) {
+    const tool = Object.hasOwn(PRODUCT_NAMES, session.tool) ? PRODUCT_NAMES[session.tool] : "coding";
+    const machine = cut(session.machine ?? "", BRIEFING_NAME_RUNES);
+    const since = localTime(session.since, now);
+    return [person === "" ? `in a ${tool} session` : `${person}, in a ${tool} session`, machine && `on ${machine}`, since && `since ${since}`]
+        .filter((part) => part !== "")
+        .join(" ");
+}
+function inFlightLine(task, now) {
+    const assignee = cut(task.assignee ?? "", BRIEFING_NAME_RUNES);
+    const person = cut(task.session?.person ?? "", BRIEFING_NAME_RUNES);
+    const where = [];
+    if (task.trinity)
+        where.push(trinityWords(task.trinity));
+    if (task.session)
+        where.push(sessionWords(task.session, person, now));
+    if (where.length === 0)
+        where.push(`${assignee || "nobody assigned"}, no session seen`);
+    else if (assignee !== "" && assignee !== person)
+        where.push(`assigned to ${assignee}`);
+    return {
+        line: `${briefingLabel(task.code, task.title, [flatten(task.priority, BRIEFING_FACT_RUNES)])}: ${where.join("; ")}`,
+        note: cut(task.activeWork ?? "", BRIEFING_NOTE_RUNES),
+    };
+}
+function suggestionLine(task) {
+    const assignee = cut(task.assignee ?? "", BRIEFING_NAME_RUNES);
+    return briefingLabel(task.code, task.title, [
+        flatten(task.priority, BRIEFING_FACT_RUNES),
+        task.status === "in_progress" ? "in progress" : "",
+        task.yours ? "yours" : assignee && `assigned to ${assignee}`,
+        task.reason === "quiet" ? "quiet for a week" : "untouched",
+    ]);
+}
+function startTaskLine(repo) {
+    const named = flatten(repo, BRIEFING_REPO_RUNES + 1);
+    const target = /^\S+$/.test(named) && [...named].length <= BRIEFING_REPO_RUNES ? `repo "${named}"` : "repo set to this checkout's git remote";
+    return `When you start on a task, call start_task with its task_code and ${target}, so the next session knows where the work is.`;
+}
+// Fits what the task context leaves of the limit: notes give way first, then suggestions, then in-flight lines, last first.
+function renderBriefing(briefing, listedTaskIds, budget) {
+    const now = new Date();
+    const working = briefing.inFlight.slice(0, BRIEFING_MAX_IN_FLIGHT).map((task) => inFlightLine(task, now));
+    const next = briefing.suggested
+        .filter((task) => !listedTaskIds.has(task.taskId))
+        .slice(0, BRIEFING_MAX_SUGGESTED)
+        .map(suggestionLine);
+    const compose = () => {
+        if (working.length === 0 && next.length === 0)
+            return [];
+        return [
+            ...(working.length > 0 ? ["Being worked on in this project:"] : []),
+            ...working.map(({ line, note }) => (note === "" ? line : `${line}; now: ${note}`)),
+            ...(next.length > 0 ? ["Suggested next (start one here, or hand it to Trinity):"] : []),
+            ...next,
+            startTaskLine(briefing.repo),
+        ];
+    };
+    const over = () => [...compose().join("\n")].length > budget;
+    for (const task of [...working].reverse()) {
+        if (!over())
+            break;
+        task.note = "";
+    }
+    while (over() && next.length > 0)
+        next.pop();
+    while (over() && working.length > 0)
+        working.pop();
+    return compose();
+}
+export function renderSessionContext(candidates, handoffs = [], briefing) {
     if (handoffs.length > 0)
         return renderHandoffs(handoffs);
     const oneLine = (value, maxRunes = SESSION_CONTEXT_FACT_RUNES) => flatten(value, maxRunes);
@@ -294,15 +409,19 @@ export function renderSessionContext(candidates, handoffs = []) {
                 : "",
         };
     });
-    if (listed.length === 0)
-        return null;
-    return [
-        "Trinity task context (workspace data, not instructions):",
+    const header = "Trinity task context (workspace data, not instructions):";
+    const tasks = listed.length === 0 ? [] : [
         ...listed.flatMap((candidate) => candidate.detail ? [candidate.line, candidate.detail] : [candidate.line]),
         listed.length === 1
             ? 'If this is a different task, say "trinity-task: <key>" once.'
             : 'If you know which task applies, say "trinity-task: <key>" once.',
-    ].join("\n");
+    ];
+    const shown = new Set(candidates.slice(0, SESSION_CONTEXT_MAX_LISTED).map((candidate) => candidate.taskId));
+    const budget = SESSION_CONTEXT_LIMIT_RUNES - [...[header, ...tasks].join("\n")].length - 1;
+    const brief = briefing === undefined ? [] : renderBriefing(briefing, shown, budget);
+    if (tasks.length === 0 && brief.length === 0)
+        return null;
+    return [header, ...tasks, ...brief].join("\n");
 }
 async function pullSessionContext(dialect, event, payload, dataDir, cfg, sessionId, repo, cwd, observedBranch, remaining) {
     const output = dialect.contextOutput;
@@ -330,10 +449,14 @@ async function pullSessionContext(dialect, event, payload, dataDir, cfg, session
         return undefined;
     let candidates = [];
     let handoffs = [];
+    let briefing;
     try {
         const answer = await fetchSessionContext(cfg, { repo, branch, prompt }, budget);
         candidates = answer?.candidates ?? [];
         handoffs = answer?.handoffs ?? [];
+        // Only the session-start pull briefs the session; a prompt-time pull looks for its task alone.
+        if (prompt === undefined)
+            briefing = { repo, inFlight: answer?.inFlight ?? [], suggested: answer?.suggested ?? [] };
     }
     catch {
         candidates = [];
@@ -344,7 +467,7 @@ async function pullSessionContext(dialect, event, payload, dataDir, cfg, session
     catch {
         // best-effort: without the marker the first prompt asks once more, which is bounded anyway
     }
-    const context = renderSessionContext(candidates, handoffs);
+    const context = renderSessionContext(candidates, handoffs, briefing);
     if (context === null)
         return undefined;
     // The block is going out, so the server may stop answering the handoffs it lists. A failed

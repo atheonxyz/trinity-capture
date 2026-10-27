@@ -92,6 +92,55 @@ function toHandoff(record) {
         source: text(record.source),
     };
 }
+function isRecord(value) {
+    return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function optionalText(value) {
+    return typeof value === "string" ? value : undefined;
+}
+function isTrinityWorkState(value) {
+    return value === "queued" || value === "working" || value === "published" || value === "blocked" || value === "failed";
+}
+function isBriefingTask(value) {
+    return isRecord(value) && typeof value.taskId === "string" && typeof value.code === "string" && typeof value.title === "string";
+}
+// A malformed trinity or session part is dropped and the task kept, since its assignee still says something.
+function toInFlight(record) {
+    const { trinity, session } = record;
+    return {
+        taskId: record.taskId,
+        code: record.code,
+        title: record.title,
+        url: optionalText(record.url),
+        priority: optionalText(record.priority) ?? "",
+        assignee: optionalText(record.assignee),
+        activeWork: optionalText(record.activeWork),
+        trinity: isRecord(trinity) && isTrinityWorkState(trinity.state)
+            ? { state: trinity.state, pullRequestUrl: optionalText(trinity.pullRequestUrl) }
+            : undefined,
+        session: isRecord(session) && typeof session.tool === "string" && typeof session.since === "string"
+            ? { tool: session.tool, machine: optionalText(session.machine), person: optionalText(session.person), since: session.since }
+            : undefined,
+    };
+}
+function isSuggestion(value) {
+    return isBriefingTask(value)
+        && (value.status === "todo" || value.status === "in_progress")
+        && (value.reason === "untouched" || value.reason === "quiet");
+}
+function toSuggestion(record) {
+    return {
+        taskId: record.taskId,
+        code: record.code,
+        title: record.title,
+        url: optionalText(record.url),
+        status: record.status,
+        priority: optionalText(record.priority) ?? "",
+        assignee: optionalText(record.assignee),
+        yours: record.yours === true,
+        reason: record.reason,
+    };
+}
 // The one read a device makes per session: which tasks this branch and person are likely on.
 // It sends nothing the capture allowlist does not already forward (the canonical repository,
 // the branch workspace.observed carries, the prompt UserPromptSubmit forwards whole), as a
@@ -118,6 +167,8 @@ export async function fetchSessionContext(cfg, query, timeoutMs) {
         ...(typeof record.projectId === "string" ? { projectId: record.projectId } : {}),
         candidates: record.candidates.filter(isCandidate),
         ...(Array.isArray(record.handoffs) ? { handoffs: record.handoffs.filter(isHandoff).map(toHandoff) } : {}),
+        ...(Array.isArray(record.inFlight) ? { inFlight: record.inFlight.filter(isBriefingTask).map(toInFlight) } : {}),
+        ...(Array.isArray(record.suggested) ? { suggested: record.suggested.filter(isSuggestion).map(toSuggestion) } : {}),
     };
 }
 // Names the handed tasks the agent was shown, so the server stops answering them. A failed

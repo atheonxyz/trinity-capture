@@ -56,6 +56,11 @@ pnpm build:copilot         # regenerate copilot/dist/
   when the branch named nothing, and again when a prompt arrives on a branch the session has not
   asked about. Cursor runs it at sessionStart only because beforeSubmitPrompt cannot inject
   context. Claude Code also exposes the on-demand `/trinity:task` command (`src/session-context.ts`).
+- The rendered context block fits the 1000 characters the Codex hooks declare
+  (`additionalContextLimit`, `SESSION_CONTEXT_LIMIT_RUNES`) whatever the server sends. A handed
+  task is the whole block. Otherwise the likely tasks come first and are never cut for the
+  project briefing (`inFlight`, `suggested`), which only a session-start pull renders and which
+  gives way first.
 - Unmatched repositories never send session events.
 - Every product's `dist/` is committed. Regenerate the relevant one after changing
   `src/`, and keep the generated diff in the same commit; CI diffs all five.

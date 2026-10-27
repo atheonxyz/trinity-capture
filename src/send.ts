@@ -127,11 +127,41 @@ export interface SessionContextHandoff {
   source: string;
 }
 
+export type TrinityWorkState = "queued" | "working" | "published" | "blocked" | "failed";
+
+// A task in progress in the repository's project, with where its work happens.
+export interface SessionContextInFlight {
+  taskId: string;
+  code: string;
+  title: string;
+  url?: string;
+  priority: string;
+  assignee?: string;
+  activeWork?: string;
+  trinity?: { state: TrinityWorkState; pullRequestUrl?: string };
+  session?: { tool: string; machine?: string; person?: string; since: string };
+}
+
+// An open task nobody has picked up (untouched) or with no update for a week (quiet).
+export interface SessionContextSuggestion {
+  taskId: string;
+  code: string;
+  title: string;
+  url?: string;
+  status: "todo" | "in_progress";
+  priority: string;
+  assignee?: string;
+  yours: boolean;
+  reason: "untouched" | "quiet";
+}
+
 export interface SessionContextAnswer {
   route: string;
   projectId?: string;
   candidates: SessionContextCandidate[];
   handoffs?: SessionContextHandoff[];
+  inFlight?: SessionContextInFlight[];
+  suggested?: SessionContextSuggestion[];
 }
 
 function isCandidate(value: unknown): value is SessionContextCandidate {
@@ -165,6 +195,66 @@ function toHandoff(record: WireHandoff): SessionContextHandoff {
   };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function optionalText(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function isTrinityWorkState(value: unknown): value is TrinityWorkState {
+  return value === "queued" || value === "working" || value === "published" || value === "blocked" || value === "failed";
+}
+
+type WireBriefingTask = Record<string, unknown> & Pick<SessionContextInFlight, "taskId" | "code" | "title">;
+
+function isBriefingTask(value: unknown): value is WireBriefingTask {
+  return isRecord(value) && typeof value.taskId === "string" && typeof value.code === "string" && typeof value.title === "string";
+}
+
+// A malformed trinity or session part is dropped and the task kept, since its assignee still says something.
+function toInFlight(record: WireBriefingTask): SessionContextInFlight {
+  const { trinity, session } = record;
+  return {
+    taskId: record.taskId,
+    code: record.code,
+    title: record.title,
+    url: optionalText(record.url),
+    priority: optionalText(record.priority) ?? "",
+    assignee: optionalText(record.assignee),
+    activeWork: optionalText(record.activeWork),
+    trinity: isRecord(trinity) && isTrinityWorkState(trinity.state)
+      ? { state: trinity.state, pullRequestUrl: optionalText(trinity.pullRequestUrl) }
+      : undefined,
+    session: isRecord(session) && typeof session.tool === "string" && typeof session.since === "string"
+      ? { tool: session.tool, machine: optionalText(session.machine), person: optionalText(session.person), since: session.since }
+      : undefined,
+  };
+}
+
+type WireSuggestion = WireBriefingTask & Pick<SessionContextSuggestion, "status" | "reason">;
+
+function isSuggestion(value: unknown): value is WireSuggestion {
+  return isBriefingTask(value)
+    && (value.status === "todo" || value.status === "in_progress")
+    && (value.reason === "untouched" || value.reason === "quiet");
+}
+
+function toSuggestion(record: WireSuggestion): SessionContextSuggestion {
+  return {
+    taskId: record.taskId,
+    code: record.code,
+    title: record.title,
+    url: optionalText(record.url),
+    status: record.status,
+    priority: optionalText(record.priority) ?? "",
+    assignee: optionalText(record.assignee),
+    yours: record.yours === true,
+    reason: record.reason,
+  };
+}
+
 // The one read a device makes per session: which tasks this branch and person are likely on.
 // It sends nothing the capture allowlist does not already forward (the canonical repository,
 // the branch workspace.observed carries, the prompt UserPromptSubmit forwards whole), as a
@@ -192,6 +282,8 @@ export async function fetchSessionContext(
     ...(typeof record.projectId === "string" ? { projectId: record.projectId } : {}),
     candidates: record.candidates.filter(isCandidate),
     ...(Array.isArray(record.handoffs) ? { handoffs: record.handoffs.filter(isHandoff).map(toHandoff) } : {}),
+    ...(Array.isArray(record.inFlight) ? { inFlight: record.inFlight.filter(isBriefingTask).map(toInFlight) } : {}),
+    ...(Array.isArray(record.suggested) ? { suggested: record.suggested.filter(isSuggestion).map(toSuggestion) } : {}),
   };
 }
 
