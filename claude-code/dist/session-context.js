@@ -7,7 +7,7 @@ import { isPolicyFresh, resolveRoute } from "./gate.js";
 import { resolveGitHubRepository } from "./github-repo.js";
 import { isMainModule } from "./main-module.js";
 import { currentBranch, gitRemoteOf } from "./observe.js";
-import { fetchSessionContext, refreshPolicy, REQUEST_TIMEOUT_MS } from "./send.js";
+import { ackHandoffs, fetchSessionContext, refreshPolicy, REQUEST_TIMEOUT_MS } from "./send.js";
 const LOOKUP_BUDGET_MS = 1_500;
 export function describeCandidates(candidates, handoffs = []) {
     if (candidates.length === 0 && handoffs.length === 0)
@@ -76,6 +76,9 @@ async function main() {
     try {
         const answer = await fetchSessionContext(cfg, { repo: route.canonicalRepo, branch: currentBranch(cwd) ?? "", prompt }, REQUEST_TIMEOUT_MS);
         console.log(describeCandidates(answer?.candidates ?? [], answer?.handoffs ?? []));
+        const ids = (answer?.handoffs ?? []).flatMap((handoff) => (handoff.id === undefined ? [] : [handoff.id]));
+        if (ids.length > 0)
+            await ackHandoffs(cfg, ids, REQUEST_TIMEOUT_MS).catch(() => undefined);
     }
     catch (err) {
         console.error(`Trinity could not be reached: ${err instanceof Error ? err.message : String(err)}`);

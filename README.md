@@ -106,15 +106,15 @@ credential directory below in `sandbox.userPolicy` so the hooks can reach it.
 
 ## Update an existing installation
 
-The task handoff release uses these plugin versions:
+The handoff acknowledgment release uses these plugin versions:
 
 | Host | Version | After updating |
 | --- | --- | --- |
-| Claude Code | `0.2.14` | Exit Claude Code and start a new session. |
-| Codex | `0.3.18` | Check the updated hooks, then start a new task. |
-| Cursor | `0.3.11` | Reload Cursor and start a new Agent conversation. |
-| Gemini CLI | `0.1.1` | Pull the clone, run `gemini extensions update trinity-capture`, then start a new session. |
-| GitHub Copilot CLI | `0.1.1` | Run `copilot plugin update trinity-capture`, then start a new session. |
+| Claude Code | `0.2.15` | Exit Claude Code and start a new session. |
+| Codex | `0.3.19` | Check the updated hooks, then start a new task. |
+| Cursor | `0.3.12` | Reload Cursor and start a new Agent conversation. |
+| Gemini CLI | `0.1.2` | Pull the clone, run `gemini extensions update trinity-capture`, then start a new session. |
+| GitHub Copilot CLI | `0.1.2` | Run `copilot plugin update trinity-capture`, then start a new session. |
 
 Update through the installation's existing source and verify the installed version.
 Each host's catalog publishes separately; a version in this repository does not mean
@@ -134,7 +134,7 @@ returns `ready`, keep the saved pairing and start a new task; do not exchange a 
 You can ask your coding agent:
 
 > Update my existing Trinity Capture plugin through its current installation source
-> to at least Claude Code 0.2.14, Codex 0.3.18, or Cursor 0.3.11, as appropriate for my
+> to at least Claude Code 0.2.15, Codex 0.3.19, or Cursor 0.3.12, as appropriate for my
 > host. Preserve its identity, data directory, and saved pairing, and verify the
 > installed version. For Codex, check the updated hooks and ask me to approve changed
 > definitions. Tell me the final restart or new-session step.
@@ -148,8 +148,10 @@ above; Cursor fetches at session start only. Lookups do not change tasks, and a 
 lookup does not stop capture.
 
 A task a person sends to this machine from Trinity opens their next session there
-with its brief and any note on what to focus on, in place of the likely tasks. Each
-handoff is delivered once, to the first session that asks for context. A title, brief
+with its brief and any note on what to focus on, in place of the likely tasks. The plugin
+acknowledges the handoffs it showed, and the server keeps answering a handoff until an
+acknowledgment lands, so a pull that timed out does not lose it. A session whose
+acknowledgment did not land sees the handoff again in the next session. A title, brief
 or note too long for the block ends with "…", and the closing line names every
 handed task's code for `get_task_context`, which reads the task in full.
 
