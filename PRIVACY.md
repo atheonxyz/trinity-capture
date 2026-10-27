@@ -4,7 +4,7 @@ Trinity Capture is designed to keep unrelated work local.
 
 ## Data processed
 
-During pairing, the plugin sends your machine's hostname and a Trinity-specific machine identity. The identity is an HMAC-SHA256 digest derived locally from the operating system's machine identifier. The raw OS identifier is never sent, logged, stored, or written to plugin configuration. Capture uploads use the saved Trinity device credential returned by pairing and do not recompute or resend the OS machine identity.
+During pairing, the plugin sends your machine's hostname and a Trinity-specific machine identity. The identity is an HMAC-SHA256 digest derived locally from the operating system's machine identifier. The raw OS identifier is never sent, logged, stored, or written to plugin configuration. Capture uploads use the saved Trinity device credential returned by pairing and do not recompute or resend the OS machine identity. Every request made with that credential also names the plugin's version, as its manifest states it, so Trinity can tell when the machine should update.
 
 This identity follows the OS installation, not guaranteed physical hardware. Reinstalling the OS, resetting a VM, or regenerating `/etc/machine-id` can create a new identity on the same hardware. Cloned disks or VM images can share one until they are regenerated. Trinity uses it for pairing continuity and device deduplication; it is not hardware attestation or fraud protection.
 

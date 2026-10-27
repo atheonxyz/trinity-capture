@@ -1,9 +1,33 @@
+import { readFileSync } from "node:fs";
 import { hostname } from "node:os";
 import type { DeviceConfig, Policy } from "./config.js";
 import { isCurrentConfig, loadPolicy, savePolicy } from "./config.js";
 import type { CaptureEvent } from "./outbox.js";
 
 export const REQUEST_TIMEOUT_MS = 5_000;
+
+// Each packaged plugin ships exactly one of these host manifests beside its dist/.
+const MANIFESTS = [".claude-plugin/plugin.json", ".codex-plugin/plugin.json", ".cursor-plugin/plugin.json", "gemini-extension.json", "plugin.json"];
+
+// The running plugin's version as its own manifest states it, read once per process.
+// Unreadable is null, and requests go without the header rather than with a guess.
+function readPluginVersion(): string | null {
+  for (const manifest of MANIFESTS) {
+    try {
+      const { version } = JSON.parse(readFileSync(new URL(`../${manifest}`, import.meta.url), "utf8")) as { version?: unknown };
+      return typeof version === "string" && /^\d+\.\d+\.\d+$/.test(version) ? version : null;
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+const PLUGIN_VERSION = readPluginVersion();
+
+function deviceHeaders(cfg: DeviceConfig, extra: Record<string, string> = {}): Record<string, string> {
+  return { Authorization: `Bearer ${cfg.token}`, ...(PLUGIN_VERSION === null ? {} : { "X-Trinity-Plugin-Version": PLUGIN_VERSION }), ...extra };
+}
 
 export interface ItemResult {
   captureEventId: string;
@@ -24,11 +48,7 @@ export async function sendBatch(
 ): Promise<ItemResult[]> {
   const res = await fetch(cfg.ingestUrl, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${cfg.token}`,
-      "Content-Type": "application/json",
-      "X-Trinity-Wire-Version": "1",
-    },
+    headers: deviceHeaders(cfg, { "Content-Type": "application/json", "X-Trinity-Wire-Version": "1" }),
     body: JSON.stringify({ items: events, hostname: hostname() }),
     signal: AbortSignal.timeout(timeoutMs),
   });
@@ -44,7 +64,7 @@ export async function refreshPolicy(
 ): Promise<Policy | null> {
   const current = loadPolicy(dataDir);
   const policyUrl = cfg.ingestUrl.replace(/\/batches$/, "/policy");
-  const headers: Record<string, string> = { Authorization: `Bearer ${cfg.token}` };
+  const headers = deviceHeaders(cfg);
   if (current) headers["If-None-Match"] = current.etag;
 
   const res = await fetch(policyUrl, { headers, signal: AbortSignal.timeout(timeoutMs) });
@@ -158,7 +178,7 @@ export async function fetchSessionContext(
 ): Promise<SessionContextAnswer | null> {
   const res = await fetch(cfg.ingestUrl.replace(/\/batches$/, "/session-context"), {
     method: "POST",
-    headers: { Authorization: `Bearer ${cfg.token}`, "Content-Type": "application/json" },
+    headers: deviceHeaders(cfg, { "Content-Type": "application/json" }),
     body: JSON.stringify({ repo: query.repo, branch: query.branch, ackHandoffs: true, ...(query.prompt === undefined ? {} : { prompt: query.prompt }) }),
     signal: AbortSignal.timeout(timeoutMs),
   });
@@ -180,7 +200,7 @@ export async function fetchSessionContext(
 export async function ackHandoffs(cfg: DeviceConfig, ids: readonly string[], timeoutMs: number): Promise<void> {
   await fetch(cfg.ingestUrl.replace(/\/batches$/, "/handoffs/ack"), {
     method: "POST",
-    headers: { Authorization: `Bearer ${cfg.token}`, "Content-Type": "application/json" },
+    headers: deviceHeaders(cfg, { "Content-Type": "application/json" }),
     body: JSON.stringify({ ids }),
     signal: AbortSignal.timeout(timeoutMs),
   });
