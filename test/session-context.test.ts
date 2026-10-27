@@ -449,7 +449,14 @@ test("an ack that fails never touches the hook's output", async () => {
   const failures: Record<string, (init?: RequestInit) => Promise<Response>> = {
     "network error": () => Promise.reject(new Error("stub: unreachable by design")),
     "older server": () => Promise.resolve(new Response(null, { status: 404 })),
-    "timeout": (init) => new Promise((_, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal?.reason))),
+    // A real pending request's socket holds the event loop open until the abort; AbortSignal.timeout's own timer does not.
+    "timeout": (init) => new Promise((_, reject) => {
+      const socket = setTimeout(() => {}, 60_000);
+      init?.signal?.addEventListener("abort", () => {
+        clearTimeout(socket);
+        reject(init.signal?.reason);
+      });
+    }),
   };
   for (const [name, fail] of Object.entries(failures)) {
     let acked = 0;
