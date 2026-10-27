@@ -11,7 +11,7 @@
     {
       "name": "trinity-capture",
       "description": "Captures GitHub Copilot CLI sessions into Trinity for allowlisted repositories.",
-      "version": "0.1.2",
+      "version": "0.1.3",
       "source": "./copilot",
       "author": {
         "name": "Trinity",

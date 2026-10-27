@@ -106,21 +106,22 @@ credential directory below in `sandbox.userPolicy` so the hooks can reach it.
 
 ## Update an existing installation
 
-The handoff acknowledgment release uses these plugin versions:
+The plugin version report release uses these plugin versions:
 
 | Host | Version | After updating |
 | --- | --- | --- |
-| Claude Code | `0.2.15` | Exit Claude Code and start a new session. |
-| Codex | `0.3.19` | Check the updated hooks, then start a new task. |
-| Cursor | `0.3.12` | Reload Cursor and start a new Agent conversation. |
-| Gemini CLI | `0.1.2` | Pull the clone, run `gemini extensions update trinity-capture`, then start a new session. |
-| GitHub Copilot CLI | `0.1.2` | Run `copilot plugin update trinity-capture`, then start a new session. |
+| Claude Code | `0.2.16` | Exit Claude Code and start a new session. |
+| Codex | `0.3.20` | Check the updated hooks, then start a new task. |
+| Cursor | `0.3.13` | Reload Cursor and start a new Agent conversation. |
+| Gemini CLI | `0.1.3` | Pull the clone, run `gemini extensions update trinity-capture`, then start a new session. |
+| GitHub Copilot CLI | `0.1.3` | Run `copilot plugin update trinity-capture`, then start a new session. |
 
 Update through the installation's existing source and verify the installed version.
 Each host's catalog publishes separately; a version in this repository does not mean
 it is already available in that catalog. Preserve the existing plugin identity, data
 directory, and saved pairing. Updating does not require a new pairing code or another
-Trinity setup flow.
+Trinity setup flow. From these versions on, each request the plugin makes to Trinity
+names the plugin's version, so Trinity can tell when a machine runs an older one.
 
 For Codex, run the installed plugin's
 `node "<pluginRoot>/dist/codex-hook-setup.js" check <codex-executable>` after updating,
@@ -134,7 +135,7 @@ returns `ready`, keep the saved pairing and start a new task; do not exchange a 
 You can ask your coding agent:
 
 > Update my existing Trinity Capture plugin through its current installation source
-> to at least Claude Code 0.2.15, Codex 0.3.19, or Cursor 0.3.12, as appropriate for my
+> to at least Claude Code 0.2.16, Codex 0.3.20, or Cursor 0.3.13, as appropriate for my
 > host. Preserve its identity, data directory, and saved pairing, and verify the
 > installed version. For Codex, check the updated hooks and ask me to approve changed
 > definitions. Tell me the final restart or new-session step.
@@ -212,7 +213,7 @@ call after a bounded wait. None of this affects capture.
 
 Capture is allowlist-first. The plugin reads the current Git remote locally and stays silent unless it matches a repository enabled in one of your Trinity projects.
 
-Pairing sends your machine's hostname and a Trinity-specific machine identity. The identity is an HMAC-SHA256 digest derived locally from the operating system's machine identifier, so the raw OS identifier is never sent, logged, or stored by the plugin. Capture uploads include the saved Trinity device credential returned by pairing, but do not recompute or resend the OS machine identity.
+Pairing sends your machine's hostname and a Trinity-specific machine identity. The identity is an HMAC-SHA256 digest derived locally from the operating system's machine identifier, so the raw OS identifier is never sent, logged, or stored by the plugin. Capture uploads include the saved Trinity device credential returned by pairing, but do not recompute or resend the OS machine identity. Every request made with that credential also names the plugin's version, as its manifest states it.
 
 The machine identity identifies an OS installation, not a physical device. Reinstalling the OS, resetting a VM, or regenerating `/etc/machine-id` can produce a new identity for the same hardware. Cloned disks or VM images can share an identity until they are regenerated. Trinity uses this value for pairing continuity and device deduplication; it is not hardware attestation or fraud protection.
 

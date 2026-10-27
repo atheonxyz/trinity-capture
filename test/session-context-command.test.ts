@@ -10,6 +10,7 @@ import { initRepo, tmpDataDir } from "./helpers/claude-hook-fixture.js";
 
 const commandBin = join(process.cwd(), "claude-code", "dist", "session-context.js");
 const command = readFileSync(join(process.cwd(), "claude-code", "commands", "task.md"), "utf8");
+const { version } = JSON.parse(readFileSync(join(process.cwd(), "claude-code", ".claude-plugin", "plugin.json"), "utf8")) as { version: string };
 
 const timeouts = {
   taskId: "t1", key: "acme/widgets#42", url: "https://github.com/acme/widgets/issues/42",
@@ -39,6 +40,7 @@ test("/trinity:task pulls with the branch and what the person said, and prints t
     request.on("data", (chunk: Buffer) => (raw += chunk.toString()));
     request.on("end", () => {
       assert.equal(request.headers.authorization, "Bearer tok");
+      assert.equal(request.headers["x-trinity-plugin-version"], version);
       response.setHeader("Content-Type", "application/json");
       if (request.url === "/api/v1/ingest/handoffs/ack") {
         acks.push(JSON.parse(raw) as Record<string, unknown>);
