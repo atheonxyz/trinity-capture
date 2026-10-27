@@ -111,7 +111,7 @@ The plugin version report release uses these plugin versions:
 | Host | Version | After updating |
 | --- | --- | --- |
 | Claude Code | `0.2.16` | Exit Claude Code and start a new session. |
-| Codex | `0.3.20` | Check the updated hooks, then start a new task. |
+| Codex | `0.3.20` | Restart Codex, then start a new task. |
 | Cursor | `0.3.13` | Reload Cursor and start a new Agent conversation. |
 | Gemini CLI | `0.1.3` | Pull the clone, run `gemini extensions update trinity-capture`, then start a new session. |
 | GitHub Copilot CLI | `0.1.3` | Run `copilot plugin update trinity-capture`, then start a new session. |
@@ -123,8 +123,18 @@ directory, and saved pairing. Updating does not require a new pairing code or an
 Trinity setup flow. From these versions on, each request the plugin makes to Trinity
 names the plugin's version, so Trinity can tell when a machine runs an older one.
 
-For Codex, run the installed plugin's
-`node "<pluginRoot>/dist/codex-hook-setup.js" check <codex-executable>` after updating,
+Two hosts can update without a manual step:
+
+- Claude Code updates the plugin by itself when auto-update is on for the `trinity`
+  marketplace. Trinity's setup turns it on; an older installation can turn it on under
+  `/plugin`, Marketplaces, `trinity`. The check runs within ten minutes of a session's
+  first message, and the next session loads the new version.
+- Codex refreshes a GitHub marketplace each time it starts and reinstalls the plugin from
+  it. The hook approvals carry over while the hook definitions are unchanged; a release
+  that changes them needs a new approval, as described below.
+
+For Codex, after a release that changes the hooks or to confirm an update, run the installed plugin's
+`node "<pluginRoot>/dist/codex-hook-setup.js" check <codex-executable>`,
 using the same host and `CODEX_HOME`. Follow the hook-check steps in
 [the connection skill](codex/skills/trinity-connect/SKILL.md), including any required
 execution access. Reuse valid approvals; if the check returns `approval_required`,
